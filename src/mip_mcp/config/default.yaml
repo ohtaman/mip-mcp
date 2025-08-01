@@ -1,0 +1,21 @@
+server:
+  name: "mip-mcp"
+  version: "0.1.0"
+  
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+executor:
+  enabled: true
+  timeout: 300  # seconds for code execution
+  memory_limit: "1GB"
+  
+solvers:
+  default: "scip"
+  timeout: 3600  # seconds
+  
+validation:
+  max_variables: 100000
+  max_constraints: 100000
+  max_code_length: 10000  # characters
