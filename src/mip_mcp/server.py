@@ -53,7 +53,8 @@ class MIPMCPServer:
             data: Optional[Dict[str, Any]] = None,
             solver_params: Optional[Dict[str, Any]] = None,
             validate_solution: bool = True,
-            validation_tolerance: float = 1e-6
+            validation_tolerance: float = 1e-6,
+            include_solver_output: bool = False
         ) -> ExecutionResponse:
             """Execute PuLP optimization code and solve the problem.
             
@@ -68,6 +69,7 @@ class MIPMCPServer:
                 solver_params: Optional solver configuration parameters
                 validate_solution: Whether to validate the solution (default: True)
                 validation_tolerance: Tolerance for constraint validation (default: 1e-6)
+                include_solver_output: Include detailed solver output in response (default: False)
                 
             Returns:
                 Optimization results including solution status, objective value, and variable values.
@@ -78,6 +80,7 @@ class MIPMCPServer:
                 solver_params=solver_params,
                 validate_solution=validate_solution,
                 validation_tolerance=validation_tolerance,
+                include_solver_output=include_solver_output,
                 config=self.config_manager.config.model_dump()
             )
         

@@ -16,6 +16,7 @@ class ExecutionResponse(BaseModel):
     library_used: Optional[str] = Field(default=None, description="MIP library used (pulp or python-mip)")
     executor_used: Optional[str] = Field(default=None, description="Executor used (pyodide for security)")
     solver_info: Optional[Dict[str, Any]] = Field(default=None, description="Information about the solver used")
+    solver_output: Optional[str] = Field(default=None, description="Detailed solver output (only included if requested)")
 
 
 class SolverInfo(BaseModel):

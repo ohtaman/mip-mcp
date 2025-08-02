@@ -47,6 +47,7 @@ async def execute_mip_code_handler(
     solver_params: Optional[Dict[str, Any]] = None,
     validate_solution: bool = True,
     validation_tolerance: float = 1e-6,
+    include_solver_output: bool = False,
     config: Optional[Dict[str, Any]] = None
 ) -> ExecutionResponse:
     """Execute PuLP code and solve the optimization problem.
@@ -57,6 +58,7 @@ async def execute_mip_code_handler(
         solver_params: Optional solver parameters
         validate_solution: Whether to validate solution against constraints
         validation_tolerance: Numerical tolerance for constraint validation
+        include_solver_output: Whether to include detailed solver output in response
         config: Configuration dictionary
         
     Returns:
@@ -95,9 +97,25 @@ async def execute_mip_code_handler(
         
         logger.info(f"Generated optimization file: {file_path}")
         
-        # Solve the optimization problem with stdout suppression for MCP
-        with suppress_stdout_for_mcp():
-            solution = await solver.solve_from_file(file_path)
+        # Solve the optimization problem, capturing solver output if requested
+        solver_output_captured = None
+        if include_solver_output:
+            # Use solver's internal summary generation (safe for MCP)
+            logger.info("Capturing solver output using internal summary generation")
+            with suppress_stdout_for_mcp():
+                solution = await solver.solve_from_file(file_path, capture_output=True)
+            
+            # Extract solver output from solution's solver_info
+            if hasattr(solution, 'solver_info') and solution.solver_info:
+                solver_output_captured = solution.solver_info.get('detailed_output', 'No detailed output available')
+            else:
+                solver_output_captured = "No solver output available"
+                
+            logger.info(f"Generated solver output summary, length: {len(solver_output_captured)}")
+        else:
+            # Suppress output for clean MCP protocol
+            with suppress_stdout_for_mcp():
+                solution = await solver.solve_from_file(file_path, capture_output=False)
         
         # Validate solution if requested and solution is optimal
         if validate_solution and solution.is_optimal:
@@ -145,7 +163,8 @@ async def execute_mip_code_handler(
             file_format="auto",
             library_used=detected_library.value,
             executor_used="pyodide",
-            solver_info=solver.get_solver_info()
+            solver_info=solver.get_solver_info(),
+            solver_output=solver_output_captured
         )
         
         logger.info(f"Optimization completed: {solution.status}")

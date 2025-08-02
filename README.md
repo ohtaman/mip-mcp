@@ -9,7 +9,7 @@ MIP MCP Server allows LLM clients to execute PuLP optimization code and solve pr
 ## Workflow
 
 ```
-LLM Client → PuLP Code → MCP Server → MPS/LP File → SCIP Solver → Results → LLM Client
+LLM Client → PuLP Code → MCP Server → MPS/LP File → MIP Solver → Results → LLM Client
 ```
 
 ## Features
@@ -54,15 +54,18 @@ python -m mip_mcp
 The server provides the following MCP tools:
 
 #### execute_mip_code
+
 Execute PuLP optimization code and solve problems in a secure Pyodide WebAssembly sandbox.
 
 **Security Features:**
+
 - Complete process isolation via Pyodide WebAssembly
 - No file system access beyond virtual filesystem  
 - Automatic problem detection from PuLP objects (recommended)
 - Manual content setting via `__mps_content__` or `__lp_content__` variables
 
 **Parameters:**
+
 - `code` (str): PuLP Python code to execute
 - `data` (dict, optional): Input data dictionary
 - `solver_params` (dict, optional): Solver parameters for SCIP
@@ -73,35 +76,43 @@ Execute PuLP optimization code and solve problems in a secure Pyodide WebAssembl
 File format is automatically detected (LP preferred, then MPS).
 
 #### get_solver_info
+
 Get information about available solvers.
 
 #### validate_mip_code
+
 Validate PuLP code for security and syntax violations.
 
 **Validation Features:**
+
 - Pyodide compatibility checking
 - PuLP library detection
 - Syntax error detection
 - Security analysis for WebAssembly environment
 
 **Parameters:**
+
 - `code` (str): PuLP Python code to validate
 
 #### get_mip_examples
+
 Get example PuLP code snippets demonstrating secure usage patterns.
 
 **Example Types:**
+
 - Linear programming (automatic detection)
 - Integer programming (automatic detection)
 - Knapsack problems (automatic detection)
 - Manual content setting (advanced usage)
 
 #### health_check
+
 Check server health and solver availability.
 
 ## Configuration
 
 Configuration can be provided via:
+
 - YAML file: `config/default.yaml`
 - Environment variables
 - Command line arguments

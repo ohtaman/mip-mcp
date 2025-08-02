@@ -1,5 +1,6 @@
 """SCIP solver implementation using pyscipopt."""
 
+import os
 import tempfile
 from typing import Dict, Any, Optional
 from pathlib import Path
@@ -32,11 +33,12 @@ class SCIPSolver(BaseSolver):
         
         self.model = None
     
-    async def solve_from_file(self, file_path: str) -> OptimizationSolution:
+    async def solve_from_file(self, file_path: str, capture_output: bool = False) -> OptimizationSolution:
         """Solve optimization problem from MPS or LP file.
         
         Args:
             file_path: Path to MPS or LP file
+            capture_output: If True, allow output for capturing; if False, suppress output
             
         Returns:
             Optimization solution
@@ -44,11 +46,15 @@ class SCIPSolver(BaseSolver):
         self.validate_file(file_path)
         
         try:
-            # Create SCIP model with quiet output for MCP compatibility
+            # Create SCIP model with conditional output suppression
             self.model = pyscipopt.Model("MIP_MCP_Problem")
             
-            # Suppress SCIP output to avoid MCP protocol pollution
+            # Always suppress SCIP output to avoid MCP protocol pollution
+            # Solver output will be captured via log file when needed
             self.model.hideOutput()
+            
+            # Note: When capture_output=True, we generate detailed output from solver statistics
+            # No need for verbose solver parameters that can slow down solving
             
             # Set parameters
             self._apply_parameters()
@@ -68,7 +74,7 @@ class SCIPSolver(BaseSolver):
             self.model.optimize()
             
             # Extract solution
-            solution = self._extract_solution()
+            solution = self._extract_solution(capture_output)
             
             logger.info(f"Optimization completed with status: {solution.status}")
             return solution
@@ -96,7 +102,7 @@ class SCIPSolver(BaseSolver):
         if self.timeout > 0:
             self.model.setParam("limits/time", self.timeout)
     
-    def _extract_solution(self) -> OptimizationSolution:
+    def _extract_solution(self, capture_output: bool = False) -> OptimizationSolution:
         """Extract solution from SCIP model.
         
         Returns:
@@ -138,6 +144,12 @@ class SCIPSolver(BaseSolver):
                 "nodes": self.model.getNNodes(),
                 "gap": self.model.getGap(),
             }
+            
+            # Generate detailed solver output if requested
+            solver_output = None
+            if capture_output:
+                solver_output = self._generate_solver_output_summary()
+                solver_info["detailed_output"] = solver_output
             
             return OptimizationSolution(
                 status=status,
@@ -226,3 +238,49 @@ class SCIPSolver(BaseSolver):
         # If model exists, apply parameters immediately
         if self.model:
             self._apply_parameters()
+    
+    def _generate_solver_output_summary(self) -> str:
+        """Generate a summary of solver output when detailed output is requested.
+        
+        Returns:
+            Formatted string with solver statistics and information
+        """
+        if not self.model:
+            return "No model available for output summary"
+        
+        try:
+            output_lines = []
+            output_lines.append("SCIP Optimization Summary")
+            output_lines.append("=" * 50)
+            output_lines.append(f"Problem Name: {self.model.getProbName()}")
+            output_lines.append(f"Variables: {self.model.getNVars()}")
+            output_lines.append(f"Constraints: {self.model.getNConss()}")
+            output_lines.append(f"Status: {self.model.getStatus()}")
+            
+            # Solving statistics
+            output_lines.append(f"Solving Time: {self.model.getSolvingTime():.3f} seconds")
+            output_lines.append(f"Nodes Processed: {self.model.getNNodes()}")
+            output_lines.append(f"Gap: {self.model.getGap():.6f}")
+            
+            # Objective value if available
+            try:
+                obj_val = self.model.getObjVal()
+                output_lines.append(f"Objective Value: {obj_val}")
+            except:
+                output_lines.append("Objective Value: Not available")
+            
+            # Bounds information
+            try:
+                primal_bound = self.model.getPrimalbound()
+                dual_bound = self.model.getDualbound()
+                output_lines.append(f"Primal Bound: {primal_bound}")
+                output_lines.append(f"Dual Bound: {dual_bound}")
+            except:
+                output_lines.append("Bound information: Not available")
+            
+            output_lines.append("=" * 50)
+            
+            return "\n".join(output_lines)
+            
+        except Exception as e:
+            return f"Error generating solver output summary: {e}"
