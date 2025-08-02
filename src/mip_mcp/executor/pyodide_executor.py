@@ -335,27 +335,21 @@ console.error('DEBUG: Node.js process ready for commands');
         self,
         code: str,
         data: Optional[Dict[str, Any]] = None,
-        output_format: str = "mps",
-        library: str = "auto"
     ) -> Tuple[str, str, Optional[str], MIPLibrary]:
         """Execute MIP code in Pyodide environment.
         
         Args:
-            code: MIP Python code to execute
+            code: PuLP Python code to execute
             data: Optional data dictionary to pass to the code  
-            output_format: Output format ("mps" or "lp")
-            library: Library to use ("auto", "pulp", "python-mip")
             
         Returns:
-            Tuple of (stdout, stderr, file_path, detected_library)
+            Tuple of (stdout, stderr, file_path, detected_library).
+            File format is automatically detected (LP preferred, then MPS).
         """
         await self._initialize_pyodide()
         
-        # Detect library
-        if library == "auto":
-            detected_library = self.detector.detect_library(code)
-        else:
-            detected_library = self.detector.validate_library_choice(library)
+        # Detect library (only PuLP supported)
+        detected_library = self.detector.detect_library(code)
         
         if detected_library == MIPLibrary.UNKNOWN:
             return "", "Unknown or unsupported MIP library", None, MIPLibrary.UNKNOWN
@@ -366,7 +360,7 @@ console.error('DEBUG: Node.js process ready for commands');
         
         try:
             # Prepare execution code
-            execution_code = self._prepare_execution_code(code, data, output_format)
+            execution_code = self._prepare_execution_code(code, data)
             
             # Execute in Pyodide
             result = await self._communicate_with_pyodide({
@@ -384,21 +378,21 @@ console.error('DEBUG: Node.js process ready for commands');
             lp_content = globals_dict.get("__lp_content__")
             mps_content = globals_dict.get("__mps_content__")
             
+            # Automatic format detection: LP preferred, then MPS
             content = None
-            if output_format == "lp" and lp_content:
+            file_format = None
+            if lp_content:
                 content = lp_content
-            elif output_format == "mps" and mps_content:
+                file_format = "lp"
+            elif mps_content:
                 content = mps_content
-            elif lp_content:  # fallback to LP if available
-                content = lp_content
-            elif mps_content:  # fallback to MPS if available
-                content = mps_content
+                file_format = "mps"
             
             if not content:
                 return "", "No optimization file content generated", None, detected_library
             
             # Write content to temporary file
-            temp_file = self._create_temp_file(content, output_format)
+            temp_file = self._create_temp_file(content, file_format)
             
             # Get execution output
             stdout = globals_dict.get("__stdout__", "Code executed successfully in Pyodide")
@@ -409,13 +403,12 @@ console.error('DEBUG: Node.js process ready for commands');
             logger.error(f"Pyodide execution failed: {e}")
             return "", f"Execution failed: {e}", None, detected_library
     
-    def _prepare_execution_code(self, user_code: str, data: Optional[Dict[str, Any]], output_format: str) -> str:
+    def _prepare_execution_code(self, user_code: str, data: Optional[Dict[str, Any]]) -> str:
         """Prepare code for execution in Pyodide.
         
         Args:
             user_code: User's MIP code
             data: Optional data dictionary
-            output_format: Desired output format
             
         Returns:
             Complete code to execute in Pyodide
@@ -490,22 +483,18 @@ globals()['__stdout__'] = __stdout__
         logger.info(f"Created temporary {format_type.upper()} file: {temp_path}")
         return temp_path
     
-    async def validate_code(self, code: str, library: str = "auto") -> Dict[str, Any]:
-        """Validate MIP code without executing it.
+    async def validate_code(self, code: str) -> Dict[str, Any]:
+        """Validate PuLP code without executing it.
         
         Args:
-            code: MIP code to validate
-            library: Library to validate for
+            code: PuLP code to validate
             
         Returns:
             Validation results
         """
         try:
-            # Detect library
-            if library == "auto":
-                detected_library = self.detector.detect_library(code)
-            else:
-                detected_library = self.detector.validate_library_choice(library)
+            # Detect library (only PuLP supported)
+            detected_library = self.detector.detect_library(code)
             
             if detected_library == MIPLibrary.UNKNOWN:
                 return {

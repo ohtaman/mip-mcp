@@ -33,7 +33,6 @@ class UniversalMIPExecutor:
         self,
         code: str,
         data: Optional[Dict[str, Any]] = None,
-        output_format: str = "mps",
         library: str = "auto"
     ) -> Tuple[str, str, Optional[str], MIPLibrary]:
         """Execute MIP code using appropriate library executor.
@@ -41,11 +40,11 @@ class UniversalMIPExecutor:
         Args:
             code: MIP code to execute
             data: Optional data dictionary
-            output_format: Output format ("mps" or "lp")
             library: Library to use ("auto", "pulp", "python-mip")
             
         Returns:
-            Tuple of (stdout, stderr, file_path, detected_library)
+            Tuple of (stdout, stderr, file_path, detected_library).
+            File format is automatically determined by the executor.
         """
         # Determine which library to use
         detected_library = self._determine_library(code, library)
@@ -63,14 +62,14 @@ class UniversalMIPExecutor:
         logger.info(f"Executing code with {detected_library.value} executor")
         
         try:
-            # Execute using library-specific method
+            # Execute using library-specific method (let executors determine format)
             if detected_library == MIPLibrary.PULP:
                 stdout, stderr, file_path = await executor.execute_and_generate_files(
-                    code, data, output_format
+                    code, data
                 )
             elif detected_library == MIPLibrary.PYTHON_MIP:
                 stdout, stderr, file_path = await executor.execute_and_generate_files(
-                    code, data, output_format
+                    code, data
                 )
             
             return stdout, stderr, file_path, detected_library

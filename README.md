@@ -1,6 +1,6 @@
 # MIP MCP Server
 
-PuLP-based Mixed Integer Programming optimization server using Model Context Protocol.
+PuLP-based Mixed Integer Programming optimization server using Model Context Protocol with Pyodide WebAssembly security.
 
 ## Overview
 
@@ -14,13 +14,14 @@ LLM Client → PuLP Code → MCP Server → MPS/LP File → SCIP Solver → Resu
 
 ## Features
 
-- **Secure PuLP Code Execution**: AST-based security validation with file writing prohibition
+- **Secure Pyodide Execution**: WebAssembly sandbox for complete isolation and security
+- **PuLP Library Support**: Comprehensive support for PuLP optimization problems
 - **Automatic Problem Detection**: No file writing required - problems detected from PuLP objects
 - **Variable-Based Content Setting**: Manual content via `__mps_content__`/`__lp_content__` variables
 - **SCIP Integration**: High-performance optimization solving
 - **MCP Protocol**: Standards-based LLM integration
 - **Flexible Solver Parameters**: Customizable optimization settings
-- **Multiple Output Formats**: Support for MPS and LP file formats
+- **Automatic Format Detection**: LP preferred, MPS fallback
 
 ## Installation
 
@@ -52,37 +53,41 @@ python -m mip_mcp
 
 The server provides the following MCP tools:
 
-#### execute_pulp_code
-Execute PuLP optimization code and solve problems in a secure sandbox.
+#### execute_mip_code
+Execute PuLP optimization code and solve problems in a secure Pyodide WebAssembly sandbox.
 
 **Security Features:**
-- File writing operations (writeLP, writeMPS) are prohibited
+- Complete process isolation via Pyodide WebAssembly
+- No file system access beyond virtual filesystem  
 - Automatic problem detection from PuLP objects (recommended)
 - Manual content setting via `__mps_content__` or `__lp_content__` variables
-- AST-based security validation
 
 **Parameters:**
-- `code` (str): PuLP Python code to execute (no file writing allowed)
+- `code` (str): PuLP Python code to execute
 - `data` (dict, optional): Input data dictionary
-- `output_format` (str): Output format ('mps' or 'lp')
-- `solver_params` (dict, optional): Solver parameters
+- `solver_params` (dict, optional): Solver parameters for SCIP
+- `validate_solution` (bool, optional): Whether to validate solution (default: True)
+- `validation_tolerance` (float, optional): Numerical tolerance (default: 1e-6)
+
+**Output Format:**
+File format is automatically detected (LP preferred, then MPS).
 
 #### get_solver_info
 Get information about available solvers.
 
-#### validate_pulp_code
+#### validate_mip_code
 Validate PuLP code for security and syntax violations.
 
 **Validation Features:**
-- AST analysis for dangerous operations
-- File writing operation detection
-- Import restriction checking
+- Pyodide compatibility checking
+- PuLP library detection
 - Syntax error detection
+- Security analysis for WebAssembly environment
 
 **Parameters:**
 - `code` (str): PuLP Python code to validate
 
-#### get_pulp_examples
+#### get_mip_examples
 Get example PuLP code snippets demonstrating secure usage patterns.
 
 **Example Types:**

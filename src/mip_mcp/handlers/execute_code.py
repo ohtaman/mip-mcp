@@ -44,39 +44,32 @@ def suppress_stdout_for_mcp():
 async def execute_mip_code_handler(
     code: str,
     data: Optional[Dict[str, Any]] = None,
-    output_format: str = "mps",
     solver_params: Optional[Dict[str, Any]] = None,
     validate_solution: bool = True,
     validation_tolerance: float = 1e-6,
-    library: str = "auto",
-    use_pyodide: bool = True,
     config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """Execute MIP code (PuLP or Python-MIP) and solve the optimization problem.
+    """Execute PuLP code and solve the optimization problem.
     
     Args:
-        code: MIP Python code to execute (PuLP or Python-MIP)
+        code: PuLP Python code to execute
         data: Optional data dictionary to pass to the code
-        output_format: File format for problem ("mps" or "lp")
         solver_params: Optional solver parameters
         validate_solution: Whether to validate solution against constraints
         validation_tolerance: Numerical tolerance for constraint validation
-        library: Library to use ("auto", "pulp", "python-mip")
         config: Configuration dictionary
         
     Returns:
-        Dictionary containing execution results and optimization solution
+        Dictionary containing execution results and optimization solution.
+        File format is automatically detected (LP preferred, then MPS).
+        Always uses Pyodide WebAssembly sandbox for security.
     """
     config = config or {}
     
     try:
-        # Choose executor based on security preference
-        if use_pyodide:
-            executor = PyodideExecutor(config)
-            logger.info(f"Using Pyodide executor for secure execution")
-        else:
-            executor = UniversalMIPExecutor(config)
-            logger.info(f"Using legacy executor")
+        # Always use Pyodide executor for security
+        executor = PyodideExecutor(config)
+        logger.info("Using Pyodide executor for secure execution")
         
         solver = SCIPSolver(config.get("solvers", {}))
         
@@ -84,17 +77,12 @@ async def execute_mip_code_handler(
         if solver_params:
             solver.set_parameters(solver_params)
         
-        logger.info(f"Executing MIP code (format: {output_format}, library: {library})")
+        logger.info("Executing PuLP code in Pyodide sandbox")
         
-        # Execute MIP code and generate optimization file
-        if use_pyodide:
-            stdout, stderr, file_path, detected_library = await executor.execute_mip_code(
-                code, data, output_format, library
-            )
-        else:
-            stdout, stderr, file_path, detected_library = await executor.execute_and_generate_files(
-                code, data, output_format, library
-            )
+        # Execute PuLP code and generate optimization file
+        stdout, stderr, file_path, detected_library = await executor.execute_mip_code(
+            code, data
+        )
         
         if not file_path:
             return {
@@ -114,22 +102,10 @@ async def execute_mip_code_handler(
         # Validate solution if requested and solution is optimal
         if validate_solution and solution.is_optimal:
             try:
-                # Re-execute code to get the original problem object
-                if use_pyodide:
-                    # For Pyodide, we would need a different validation approach
-                    # Skip validation for now with Pyodide (TODO: implement)
-                    logger.info("Solution validation not yet implemented for Pyodide executor")
-                    problem_obj = None
-                elif detected_library == MIPLibrary.PULP:
-                    namespace = executor.executors[detected_library]._prepare_namespace(data)
-                    exec(code, namespace)
-                    problem_obj = executor.executors[detected_library].extract_problem_from_pulp(namespace)
-                elif detected_library == MIPLibrary.PYTHON_MIP:
-                    namespace = executor.executors[detected_library]._prepare_namespace(data)
-                    exec(code, namespace)
-                    problem_obj = executor.executors[detected_library].extract_model_from_namespace(namespace)
-                else:
-                    problem_obj = None
+                # For Pyodide, validation is not yet implemented
+                # TODO: implement solution validation for Pyodide environment
+                logger.info("Solution validation not yet implemented for Pyodide executor")
+                problem_obj = None
                 
                 if problem_obj:
                     validator = SolutionValidator(validation_tolerance)
@@ -142,7 +118,7 @@ async def execute_mip_code_handler(
                     solution.validation = SolutionValidation(**validation_result)
                     logger.info(f"Solution validation completed: valid={validation_result['is_valid']}")
                 else:
-                    logger.warning(f"Could not extract {detected_library.value} problem for validation")
+                    logger.info("Solution validation skipped - not implemented for Pyodide yet")
                     
             except Exception as e:
                 logger.error(f"Solution validation failed: {e}")
@@ -166,9 +142,9 @@ async def execute_mip_code_handler(
             "stdout": stdout,
             "stderr": stderr,
             "solution": solution.model_dump(),
-            "file_format": output_format,
+            "file_format": "auto",
             "library_used": detected_library.value,
-            "executor_used": "pyodide" if use_pyodide else "legacy",
+            "executor_used": "pyodide",
             "solver_info": solver.get_solver_info()
         }
         
@@ -177,7 +153,7 @@ async def execute_mip_code_handler(
         
     except Exception as e:
         # Clean up Pyodide if needed
-        if use_pyodide and isinstance(executor, PyodideExecutor):
+        if isinstance(executor, PyodideExecutor):
             try:
                 await executor.cleanup()
             except:
@@ -258,28 +234,21 @@ async def get_solver_info_handler(config: Optional[Dict[str, Any]] = None) -> Di
 
 async def validate_mip_code_handler(
     code: str,
-    library: str = "auto",
-    use_pyodide: bool = True,
     config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """Validate MIP code without executing it.
+    """Validate PuLP code without executing it.
     
     Args:
-        code: MIP Python code to validate (PuLP or Python-MIP)
-        library: Library to use ("auto", "pulp", "python-mip")
+        code: PuLP Python code to validate
         config: Configuration dictionary
         
     Returns:
         Dictionary with validation results
     """
     try:
-        # Choose executor for validation
-        if use_pyodide:
-            executor = PyodideExecutor(config or {})
-            result = await executor.validate_code(code, library)
-        else:
-            executor = UniversalMIPExecutor(config or {})
-            result = await executor.validate_code(code, library)
+        # Always use Pyodide executor for validation
+        executor = PyodideExecutor(config or {})
+        result = await executor.validate_code(code)
         
         return result
     
