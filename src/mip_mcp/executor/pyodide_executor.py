@@ -13,6 +13,11 @@ from ..utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+class SecurityError(Exception):
+    """Security-related error during code validation."""
+    pass
+
+
 class PyodideExecutor:
     """Secure Pyodide-based executor for MIP code."""
     

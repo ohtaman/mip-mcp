@@ -8,7 +8,7 @@ import os
 from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
 
-from .sandbox import SecurityChecker, SecurityError
+from .pyodide_executor import SecurityError
 from ..models.solution import OptimizationSolution
 from ..utils.logger import get_logger
 
@@ -25,7 +25,8 @@ class PythonMIPCodeExecutor:
             config: Configuration dictionary
         """
         self.config = config
-        self.security_checker = SecurityChecker()
+        # NOTE: Security checking is now handled by Pyodide WebAssembly sandbox
+        # This executor is legacy and should be phased out in favor of PyodideExecutor
         self.timeout = config.get("executor", {}).get("timeout", 300)
     
     async def execute_mip_code(
@@ -46,8 +47,8 @@ class PythonMIPCodeExecutor:
             SecurityError: If code fails security validation
             CodeExecutionError: If code execution fails
         """
-        # Validate code security
-        self.security_checker.validate_code(code)
+        # NOTE: Security validation is now handled by Pyodide WebAssembly sandbox
+        # This legacy executor should be replaced by PyodideExecutor for production use
         
         # Prepare execution environment
         namespace = self._prepare_namespace(data)

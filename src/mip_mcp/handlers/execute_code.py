@@ -8,8 +8,7 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 
 from ..executor.universal_executor import UniversalMIPExecutor
-from ..executor.pyodide_executor import PyodideExecutor
-from ..executor.sandbox import SecurityError
+from ..executor.pyodide_executor import PyodideExecutor, SecurityError
 from ..executor.code_executor import CodeExecutionError
 from ..solvers.scip_solver import SCIPSolver
 from ..models.solution import OptimizationSolution, SolutionValidation

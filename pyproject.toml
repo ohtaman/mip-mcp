@@ -30,8 +30,7 @@ cloud = [
 ]
 
 [project.scripts]
-mip-mcp = "mip_mcp:cli"
-mip-mcp-server = "mip_mcp.mcp_server:mcp_main"
+mip-mcp = "mip_mcp.mcp_server:mcp_main"
 
 [build-system]
 requires = ["hatchling"]

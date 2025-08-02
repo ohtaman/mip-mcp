@@ -1,4 +1,12 @@
-"""Security sandbox for Python code execution."""
+"""Security sandbox for Python code execution.
+
+DEPRECATED: This custom sandbox implementation has been replaced by Pyodide WebAssembly sandbox
+for maximum security. This file is kept for backward compatibility but should not be used
+in production. Use PyodideExecutor instead.
+
+SECURITY NOTICE: This implementation has known vulnerabilities and should not be relied upon
+for secure code execution.
+"""
 
 import ast
 from typing import Set, List, Optional
