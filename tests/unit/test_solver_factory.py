@@ -4,7 +4,6 @@ import pytest
 from unittest.mock import Mock, patch
 
 from src.mip_mcp.solvers.factory import SolverFactory
-from src.mip_mcp.solvers.base import BaseSolver
 from src.mip_mcp.solvers.scip_solver import SCIPSolver
 
 

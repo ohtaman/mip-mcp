@@ -1,20 +1,17 @@
 """MCP handler for executing PuLP code and solving optimization problems."""
 
-import tempfile
 import os
 import sys
 import contextlib
 import asyncio
 from typing import Dict, Any, Optional, AsyncGenerator, Union
-from pathlib import Path
 
 from ..executor.pyodide_executor import PyodideExecutor
 from ..exceptions import CodeExecutionError, SecurityError
 from ..solvers.factory import SolverFactory
-from ..models.solution import OptimizationSolution, SolutionValidation
+from ..models.solution import SolutionValidation
 from ..models.responses import ExecutionResponse, SolverInfoResponse, ValidationResponse, ExamplesResponse, SolverInfo, ValidationIssue, ExampleCode, ProgressResponse, SolverProgress
 from ..utils.solution_validator import SolutionValidator
-from ..utils.library_detector import MIPLibrary
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -645,10 +642,10 @@ async def validate_mip_code_handler(
 
 
 async def get_mip_examples_handler() -> ExamplesResponse:
-    """Get example MIP code snippets for both PuLP and Python-MIP.
+    """Get example MIP code snippets for PuLP.
     
     Returns:
-        Dictionary with example code snippets for both libraries
+        Dictionary with example code snippets for PuLP library
     """
     examples = {
         "linear_programming": {
@@ -745,78 +742,6 @@ prob += x <= 40
 # (recommended approach)'''
         },
         
-        "python_mip_linear": {
-            "name": "Linear Programming (Python-MIP)",
-            "description": "Simple LP problem using Python-MIP library",
-            "code": '''import mip
-
-# Create model
-model = mip.Model("Example_LP", sense=mip.MAXIMIZE)
-
-# Decision variables
-x = model.add_var("x", lb=0)
-y = model.add_var("y", lb=0)
-
-# Objective function
-model.objective = 3*x + 2*y
-
-# Constraints
-model += 2*x + y <= 100
-model += x + y <= 80
-model += x <= 40
-
-# Model will be automatically converted to MPS/LP format'''
-        },
-        
-        "python_mip_integer": {
-            "name": "Integer Programming (Python-MIP)",
-            "description": "IP problem with integer variables using Python-MIP",
-            "code": '''import mip
-
-# Create model
-model = mip.Model("Example_IP", sense=mip.MAXIMIZE)
-
-# Integer decision variables
-x = model.add_var("x", lb=0, var_type=mip.INTEGER)
-y = model.add_var("y", lb=0, var_type=mip.INTEGER)
-
-# Objective function
-model.objective = 3*x + 2*y
-
-# Constraints
-model += 2*x + y <= 100
-model += x + y <= 80
-
-# Model will be automatically converted to MPS/LP format'''
-        },
-        
-        "python_mip_knapsack": {
-            "name": "Knapsack Problem (Python-MIP)",
-            "description": "Classic 0-1 knapsack problem using Python-MIP",
-            "code": '''import mip
-
-# Data
-items = ['item1', 'item2', 'item3', 'item4']
-values = {'item1': 10, 'item2': 40, 'item3': 30, 'item4': 50}
-weights = {'item1': 5, 'item2': 4, 'item3': 6, 'item4': 3}
-capacity = 10
-
-# Create model
-model = mip.Model("Knapsack", sense=mip.MAXIMIZE)
-
-# Binary variables
-x = {}
-for item in items:
-    x[item] = model.add_var(f"x_{item}", var_type=mip.BINARY)
-
-# Objective function
-model.objective = mip.xsum(values[item] * x[item] for item in items)
-
-# Capacity constraint
-model += mip.xsum(weights[item] * x[item] for item in items) <= capacity
-
-# Model will be automatically converted to MPS/LP format'''
-        }
     }
     
     # Convert dict examples to ExampleCode models
@@ -826,7 +751,7 @@ model += mip.xsum(weights[item] * x[item] for item in items) <= capacity
             name=ex["name"],
             description=ex["description"],
             code=ex["code"],
-            library="pulp" if "pulp" in ex["code"] else "python-mip" if "mip" in ex["code"] else None
+            library="pulp"
         )
     
     return ExamplesResponse(

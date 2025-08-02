@@ -1,6 +1,5 @@
 """Tests for model classes."""
 
-import pytest
 from pathlib import Path
 import sys
 

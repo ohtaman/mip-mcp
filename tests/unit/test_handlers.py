@@ -2,10 +2,8 @@
 
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
-from typing import Dict, Any
 
 # Required dependencies - should always be available
-import fastmcp
 
 from mip_mcp.handlers.execute_code import (
     execute_mip_code_handler,
@@ -16,7 +14,7 @@ from mip_mcp.handlers.execute_code import (
 )
 from mip_mcp.models.responses import (
     ExecutionResponse, SolverInfoResponse, ValidationResponse, 
-    ExamplesResponse, SolverProgress
+    ExamplesResponse
 )
 from mip_mcp.utils.library_detector import MIPLibrary
 from tests.fixtures.sample_problems import SIMPLE_LP, INVALID_SYNTAX

@@ -2,7 +2,7 @@
 
 import ast
 import re
-from typing import Set, Optional, List
+from typing import Set, List
 from enum import Enum
 
 from ..utils.logger import get_logger
@@ -13,14 +13,13 @@ logger = get_logger(__name__)
 class MIPLibrary(Enum):
     """Supported MIP libraries."""
     PULP = "pulp"
-    PYTHON_MIP = "python-mip"
     UNKNOWN = "unknown"
 
 
 class MIPLibraryDetector:
     """Detects which MIP library is being used in Python code."""
     
-    # Import patterns for each library
+    # Import patterns for PuLP library
     LIBRARY_IMPORTS = {
         MIPLibrary.PULP: {
             'import_patterns': [
@@ -35,22 +34,6 @@ class MIPLibraryDetector:
                 r'LpMinimize',
                 r'writeLP\s*\(',
                 r'writeMPS\s*\(',
-            ]
-        },
-        MIPLibrary.PYTHON_MIP: {
-            'import_patterns': [
-                r'import\s+mip',
-                r'from\s+mip\s+import',
-            ],
-            'usage_patterns': [
-                r'mip\.',
-                r'Model\s*\(',
-                r'add_var\s*\(',
-                r'add_constr\s*\(',
-                r'MAXIMIZE',
-                r'MINIMIZE',
-                r'\.write\s*\(',
-                r'\.optimize\s*\(',
             ]
         }
     }
@@ -89,11 +72,9 @@ class MIPLibraryDetector:
             
             imports = visitor.imports
             
-            # Check for library-specific imports
+            # Check for PuLP imports
             if any('pulp' in imp for imp in imports):
                 return MIPLibrary.PULP
-            elif any('mip' in imp for imp in imports):
-                return MIPLibrary.PYTHON_MIP
             
             return MIPLibrary.UNKNOWN
             
@@ -145,12 +126,10 @@ class MIPLibraryDetector:
         
         if library_lower in ['pulp']:
             return MIPLibrary.PULP
-        elif library_lower in ['python-mip', 'mip', 'python_mip']:
-            return MIPLibrary.PYTHON_MIP
         elif library_lower in ['auto', 'detect']:
             return MIPLibrary.UNKNOWN  # Will trigger auto-detection
         else:
-            logger.warning(f"Unknown library: {library}")
+            logger.warning(f"Unknown library: {library}, only PuLP is supported")
             return MIPLibrary.UNKNOWN
 
 

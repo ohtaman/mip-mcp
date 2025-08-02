@@ -18,11 +18,6 @@ def test_python_version():
 def test_import_basic_modules():
     """Test basic module imports."""
     # Test core imports that should always work
-    import mip_mcp
-    import mip_mcp.models
-    import mip_mcp.models.config
-    import mip_mcp.models.solution
-    import mip_mcp.models.responses
     
     # Verify basic classes exist
     from mip_mcp.models.config import Config, ServerConfig

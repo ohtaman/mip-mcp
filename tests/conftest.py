@@ -5,7 +5,6 @@ import tempfile
 import pytest
 from pathlib import Path
 from unittest.mock import Mock, AsyncMock
-from typing import Dict, Any, Optional
 
 # Add src directory to Python path for testing
 import sys
@@ -14,7 +13,6 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 from mip_mcp.utils.config_manager import ConfigManager
-from mip_mcp.models.config import ServerConfig, ExecutorConfig
 
 
 @pytest.fixture

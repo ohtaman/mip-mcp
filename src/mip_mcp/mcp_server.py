@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Pure MCP server entry point without CLI output."""
 
-import asyncio
 import sys
 import os
 

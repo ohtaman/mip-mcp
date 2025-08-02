@@ -3,14 +3,11 @@
 import asyncio
 import json
 import tempfile
-import os
 import time
-from typing import Dict, Any, Optional, Tuple, Union, Callable
-from pathlib import Path
+from typing import Dict, Any, Optional, Tuple, Callable
 
 from ..utils.library_detector import MIPLibraryDetector, MIPLibrary
 from ..utils.logger import get_logger
-from ..exceptions import SecurityError
 from ..models.responses import SolverProgress
 
 logger = get_logger(__name__)

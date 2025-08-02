@@ -13,7 +13,6 @@ dependencies = [
     "pulp>=2.7.0",
     "pydantic>=2.0.0",
     "pyyaml>=6.0",
-    "mip>=1.15.0",
 ]
 
 [project.optional-dependencies]
@@ -21,12 +20,6 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
-    "black>=23.0.0",
-    "isort>=5.12.0",
-    "mypy>=1.0.0",
-]
-cloud = [
-    "google-cloud-secret-manager>=2.16.0",
 ]
 
 [project.scripts]
@@ -42,3 +35,4 @@ dev = [
     "pytest-asyncio>=1.1.0",
     "pytest-cov>=6.2.1",
 ]
+

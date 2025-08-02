@@ -1,6 +1,6 @@
 """Data models for optimization solutions."""
 
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
 
 

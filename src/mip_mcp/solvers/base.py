@@ -1,7 +1,7 @@
 """Base solver abstraction layer."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from pathlib import Path
 
 from ..models.solution import OptimizationSolution

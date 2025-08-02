@@ -1,14 +1,12 @@
 """MIP MCP Server implementation."""
 
 from typing import Optional, Dict, Any
-import asyncio
 
 from fastmcp import FastMCP, Context
 
 from .models.responses import ExecutionResponse, SolverInfoResponse, ValidationResponse, ExamplesResponse
 
 from .handlers.execute_code import (
-    execute_mip_code_handler,
     execute_mip_code_with_mcp_progress,
     get_solver_info_handler,
     validate_mip_code_handler,
@@ -21,7 +19,7 @@ logger = get_logger(__name__)
 
 
 class MIPMCPServer:
-    """MIP MCP Server for Mathematical Optimization (PuLP, Python-MIP)."""
+    """MIP MCP Server for Mathematical Optimization (PuLP)."""
     
     def __init__(self, config_path: Optional[str] = None):
         """Initialize the MCP server.

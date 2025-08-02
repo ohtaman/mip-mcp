@@ -1,10 +1,8 @@
 """SCIP solver implementation using pyscipopt."""
 
-import os
-import tempfile
 import time
 import asyncio
-from typing import Dict, Any, Optional, AsyncGenerator, Callable
+from typing import Dict, Any, Optional, Callable
 from pathlib import Path
 
 try:
@@ -14,7 +12,7 @@ except ImportError:
 
 from .base import BaseSolver, SolverError
 from ..models.solution import OptimizationSolution
-from ..models.responses import SolverProgress, ProgressResponse
+from ..models.responses import SolverProgress
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)

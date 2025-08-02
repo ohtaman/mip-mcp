@@ -3,7 +3,7 @@
 import pytest
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import yaml
 
@@ -11,7 +11,7 @@ from mip_mcp.utils.config_manager import ConfigManager
 from mip_mcp.utils.library_detector import MIPLibraryDetector, MIPLibrary
 from mip_mcp.utils.solution_validator import SolutionValidator
 from mip_mcp.utils.logger import setup_logging, get_logger
-from mip_mcp.models.solution import OptimizationSolution, SolutionValidation
+from mip_mcp.models.solution import OptimizationSolution
 
 
 class TestConfigManager:
@@ -141,7 +141,6 @@ class TestMIPLibraryDetector:
         supported = detector.get_supported_libraries()
         assert isinstance(supported, list)
         assert "pulp" in supported
-        assert "python-mip" in supported
 
     def test_detect_library_pulp(self):
         """Test detecting PuLP library in code."""
@@ -156,18 +155,6 @@ class TestMIPLibraryDetector:
         library = detector.detect_library(pulp_code)
         assert library == MIPLibrary.PULP
 
-    def test_detect_library_python_mip(self):
-        """Test detecting python-mip library in code."""
-        detector = MIPLibraryDetector()
-        
-        mip_code = """
-        from mip import Model, maximize, BINARY
-        m = Model()
-        x = m.add_var(var_type=BINARY)
-        """
-        
-        library = detector.detect_library(mip_code)
-        assert library == MIPLibrary.PYTHON_MIP
 
     def test_detect_library_unknown(self):
         """Test detecting no MIP library in code."""
@@ -182,19 +169,6 @@ class TestMIPLibraryDetector:
         library = detector.detect_library(plain_code)
         assert library == MIPLibrary.UNKNOWN
 
-    def test_detect_library_multiple(self):
-        """Test detecting multiple libraries (should return first found)."""
-        detector = MIPLibraryDetector()
-        
-        mixed_code = """
-        import pulp
-        from mip import Model
-        prob = pulp.LpProblem("Test")
-        """
-        
-        library = detector.detect_library(mixed_code)
-        # Should return PuLP as it's typically checked first
-        assert library == MIPLibrary.PULP
 
     def test_validate_library_choice_pulp(self):
         """Test validating PuLP library choice."""
@@ -206,18 +180,6 @@ class TestMIPLibraryDetector:
         result = detector.validate_library_choice("PULP")
         assert result == MIPLibrary.PULP
 
-    def test_validate_library_choice_python_mip(self):
-        """Test validating python-mip library choice."""
-        detector = MIPLibraryDetector()
-        
-        result = detector.validate_library_choice("python-mip")
-        assert result == MIPLibrary.PYTHON_MIP
-        
-        result = detector.validate_library_choice("mip")
-        assert result == MIPLibrary.PYTHON_MIP
-        
-        result = detector.validate_library_choice("python_mip")
-        assert result == MIPLibrary.PYTHON_MIP
 
     def test_validate_library_choice_auto(self):
         """Test validating auto-detection choice."""
@@ -288,9 +250,8 @@ class TestMIPLibraryDetector:
         supported = detector.get_supported_libraries()
         
         assert isinstance(supported, list)
-        assert len(supported) >= 2  # At least PuLP and python-mip
+        assert len(supported) >= 1  # At least PuLP
         assert "pulp" in supported
-        assert "python-mip" in supported
         assert "unknown" not in supported  # Should exclude UNKNOWN enum
 
 

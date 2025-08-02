@@ -1,7 +1,6 @@
 """Solution validation utilities for PuLP optimization problems."""
 
-from typing import Dict, Any, List, Optional, Union
-import math
+from typing import Dict, Any, List, Optional
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)

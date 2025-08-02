@@ -1,6 +1,6 @@
 """Response models for MCP tools."""
 
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -13,7 +13,7 @@ class ExecutionResponse(BaseModel):
     stderr: str = Field(description="Standard error output from code execution")
     solution: Optional[Dict[str, Any]] = Field(default=None, description="Optimization solution details if successful")
     file_format: Optional[str] = Field(default=None, description="File format used (auto, mps, or lp)")
-    library_used: Optional[str] = Field(default=None, description="MIP library used (pulp or python-mip)")
+    library_used: Optional[str] = Field(default=None, description="MIP library used (pulp)")
     executor_used: Optional[str] = Field(default=None, description="Executor used (pyodide for security)")
     solver_info: Optional[Dict[str, Any]] = Field(default=None, description="Information about the solver used")
     solver_output: Optional[str] = Field(default=None, description="Detailed solver output (only included if requested)")
@@ -82,7 +82,7 @@ class ExampleCode(BaseModel):
     name: str = Field(description="Example name")
     description: str = Field(description="Description of what the example demonstrates")
     code: str = Field(description="The example code")
-    library: Optional[str] = Field(description="Library used in the example (pulp or python-mip)")
+    library: Optional[str] = Field(description="Library used in the example (pulp)")
 
 
 class SolverProgress(BaseModel):

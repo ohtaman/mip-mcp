@@ -1,6 +1,6 @@
 """Configuration data models."""
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from pydantic import BaseModel, Field
 
 
