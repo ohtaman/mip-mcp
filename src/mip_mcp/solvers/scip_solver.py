@@ -44,8 +44,11 @@ class SCIPSolver(BaseSolver):
         self.validate_file(file_path)
         
         try:
-            # Create SCIP model
+            # Create SCIP model with quiet output for MCP compatibility
             self.model = pyscipopt.Model("MIP_MCP_Problem")
+            
+            # Suppress SCIP output to avoid MCP protocol pollution
+            self.model.hideOutput()
             
             # Set parameters
             self._apply_parameters()

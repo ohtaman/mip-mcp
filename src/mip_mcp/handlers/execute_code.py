@@ -2,32 +2,67 @@
 
 import tempfile
 import os
+import sys
+import contextlib
 from typing import Dict, Any, Optional
 from pathlib import Path
 
-from ..executor.code_executor import PuLPCodeExecutor, CodeExecutionError
+from ..executor.universal_executor import UniversalMIPExecutor
+from ..executor.pyodide_executor import PyodideExecutor
 from ..executor.sandbox import SecurityError
+from ..executor.code_executor import CodeExecutionError
 from ..solvers.scip_solver import SCIPSolver
-from ..models.solution import OptimizationSolution
+from ..models.solution import OptimizationSolution, SolutionValidation
+from ..utils.solution_validator import SolutionValidator
+from ..utils.library_detector import MIPLibrary
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-async def execute_pulp_code_handler(
+@contextlib.contextmanager
+def suppress_stdout_for_mcp():
+    """Suppress stdout in MCP mode to prevent protocol pollution."""
+    # Check if we're in MCP mode by looking for CLI indicators
+    is_mcp_mode = (
+        os.environ.get('MCP_MODE') == '1' or
+        '--mcp' in sys.argv or
+        'mcp-server' in ' '.join(sys.argv)
+    )
+    
+    if is_mcp_mode:
+        # Redirect stdout to stderr to avoid JSON protocol pollution
+        original_stdout = sys.stdout
+        try:
+            sys.stdout = sys.stderr
+            yield
+        finally:
+            sys.stdout = original_stdout
+    else:
+        yield
+
+
+async def execute_mip_code_handler(
     code: str,
     data: Optional[Dict[str, Any]] = None,
     output_format: str = "mps",
     solver_params: Optional[Dict[str, Any]] = None,
+    validate_solution: bool = True,
+    validation_tolerance: float = 1e-6,
+    library: str = "auto",
+    use_pyodide: bool = True,
     config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """Execute PuLP code and solve the optimization problem.
+    """Execute MIP code (PuLP or Python-MIP) and solve the optimization problem.
     
     Args:
-        code: PuLP Python code to execute
+        code: MIP Python code to execute (PuLP or Python-MIP)
         data: Optional data dictionary to pass to the code
         output_format: File format for problem ("mps" or "lp")
         solver_params: Optional solver parameters
+        validate_solution: Whether to validate solution against constraints
+        validation_tolerance: Numerical tolerance for constraint validation
+        library: Library to use ("auto", "pulp", "python-mip")
         config: Configuration dictionary
         
     Returns:
@@ -36,20 +71,31 @@ async def execute_pulp_code_handler(
     config = config or {}
     
     try:
-        # Initialize components
-        executor = PuLPCodeExecutor(config)
+        # Choose executor based on security preference
+        if use_pyodide:
+            executor = PyodideExecutor(config)
+            logger.info(f"Using Pyodide executor for secure execution")
+        else:
+            executor = UniversalMIPExecutor(config)
+            logger.info(f"Using legacy executor")
+        
         solver = SCIPSolver(config.get("solvers", {}))
         
         # Apply solver parameters if provided
         if solver_params:
             solver.set_parameters(solver_params)
         
-        logger.info(f"Executing PuLP code (format: {output_format})")
+        logger.info(f"Executing MIP code (format: {output_format}, library: {library})")
         
-        # Execute PuLP code and generate optimization file
-        stdout, stderr, file_path = await executor.execute_and_generate_files(
-            code, data, output_format
-        )
+        # Execute MIP code and generate optimization file
+        if use_pyodide:
+            stdout, stderr, file_path, detected_library = await executor.execute_mip_code(
+                code, data, output_format, library
+            )
+        else:
+            stdout, stderr, file_path, detected_library = await executor.execute_and_generate_files(
+                code, data, output_format, library
+            )
         
         if not file_path:
             return {
@@ -62,8 +108,50 @@ async def execute_pulp_code_handler(
         
         logger.info(f"Generated optimization file: {file_path}")
         
-        # Solve the optimization problem
-        solution = await solver.solve_from_file(file_path)
+        # Solve the optimization problem with stdout suppression for MCP
+        with suppress_stdout_for_mcp():
+            solution = await solver.solve_from_file(file_path)
+        
+        # Validate solution if requested and solution is optimal
+        if validate_solution and solution.is_optimal:
+            try:
+                # Re-execute code to get the original problem object
+                if use_pyodide:
+                    # For Pyodide, we would need a different validation approach
+                    # Skip validation for now with Pyodide (TODO: implement)
+                    logger.info("Solution validation not yet implemented for Pyodide executor")
+                    problem_obj = None
+                elif detected_library == MIPLibrary.PULP:
+                    namespace = executor.executors[detected_library]._prepare_namespace(data)
+                    exec(code, namespace)
+                    problem_obj = executor.executors[detected_library].extract_problem_from_pulp(namespace)
+                elif detected_library == MIPLibrary.PYTHON_MIP:
+                    namespace = executor.executors[detected_library]._prepare_namespace(data)
+                    exec(code, namespace)
+                    problem_obj = executor.executors[detected_library].extract_model_from_namespace(namespace)
+                else:
+                    problem_obj = None
+                
+                if problem_obj:
+                    validator = SolutionValidator(validation_tolerance)
+                    validation_result = validator.validate_solution(
+                        problem_obj, 
+                        solution.model_dump()
+                    )
+                    
+                    # Create validation model and add to solution
+                    solution.validation = SolutionValidation(**validation_result)
+                    logger.info(f"Solution validation completed: valid={validation_result['is_valid']}")
+                else:
+                    logger.warning(f"Could not extract {detected_library.value} problem for validation")
+                    
+            except Exception as e:
+                logger.error(f"Solution validation failed: {e}")
+                solution.validation = SolutionValidation(
+                    is_valid=False,
+                    tolerance_used=validation_tolerance,
+                    error=f"Validation failed: {e}"
+                )
         
         # Clean up temporary file
         try:
@@ -80,12 +168,33 @@ async def execute_pulp_code_handler(
             "stderr": stderr,
             "solution": solution.model_dump(),
             "file_format": output_format,
+            "library_used": detected_library.value,
+            "executor_used": "pyodide" if use_pyodide else "legacy",
             "solver_info": solver.get_solver_info()
         }
         
         logger.info(f"Optimization completed: {solution.status}")
         return response
         
+    except Exception as e:
+        # Clean up Pyodide if needed
+        if use_pyodide and isinstance(executor, PyodideExecutor):
+            try:
+                await executor.cleanup()
+            except:
+                pass
+        
+        if "security" in str(e).lower():
+            logger.error(f"Security error: {e}")
+            return {
+                "status": "security_error",
+                "message": f"Code contains security violations: {e}",
+                "stdout": "",
+                "stderr": "",
+                "solution": None
+            }
+        raise
+    
     except SecurityError as e:
         logger.error(f"Security error: {e}")
         return {
@@ -148,37 +257,32 @@ async def get_solver_info_handler(config: Optional[Dict[str, Any]] = None) -> Di
         }
 
 
-async def validate_pulp_code_handler(
+async def validate_mip_code_handler(
     code: str,
+    library: str = "auto",
+    use_pyodide: bool = True,
     config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """Validate PuLP code without executing it.
+    """Validate MIP code without executing it.
     
     Args:
-        code: PuLP Python code to validate
+        code: MIP Python code to validate (PuLP or Python-MIP)
+        library: Library to use ("auto", "pulp", "python-mip")
         config: Configuration dictionary
         
     Returns:
         Dictionary with validation results
     """
     try:
-        executor = PuLPCodeExecutor(config or {})
+        # Choose executor for validation
+        if use_pyodide:
+            executor = PyodideExecutor(config or {})
+            result = await executor.validate_code(code, library)
+        else:
+            executor = UniversalMIPExecutor(config or {})
+            result = await executor.validate_code(code, library)
         
-        # Only validate security, don't execute
-        executor.security_checker.validate_code(code)
-        
-        return {
-            "status": "valid",
-            "message": "Code passed security validation",
-            "issues": []
-        }
-    
-    except SecurityError as e:
-        return {
-            "status": "invalid",
-            "message": "Code has security issues",
-            "issues": [str(e)]
-        }
+        return result
     
     except Exception as e:
         logger.error(f"Validation error: {e}")
@@ -189,11 +293,11 @@ async def validate_pulp_code_handler(
         }
 
 
-async def get_pulp_examples_handler() -> Dict[str, Any]:
-    """Get example PuLP code snippets.
+async def get_mip_examples_handler() -> Dict[str, Any]:
+    """Get example MIP code snippets for both PuLP and Python-MIP.
     
     Returns:
-        Dictionary with example code snippets
+        Dictionary with example code snippets for both libraries
     """
     examples = {
         "linear_programming": {
@@ -270,8 +374,8 @@ prob += pulp.lpSum([weights[item] * x[item] for item in items]) <= capacity
         },
         
         "manual_content_setting": {
-            "name": "Manual Content Setting",
-            "description": "Example of setting MPS/LP content manually",
+            "name": "Manual Content Setting (PuLP)",
+            "description": "Example of setting MPS/LP content manually with PuLP",
             "code": '''import pulp
 
 # Create a simple problem
@@ -288,6 +392,79 @@ prob += x <= 40
 
 # Or let the system auto-generate from the problem object
 # (recommended approach)'''
+        },
+        
+        "python_mip_linear": {
+            "name": "Linear Programming (Python-MIP)",
+            "description": "Simple LP problem using Python-MIP library",
+            "code": '''import mip
+
+# Create model
+model = mip.Model("Example_LP", sense=mip.MAXIMIZE)
+
+# Decision variables
+x = model.add_var("x", lb=0)
+y = model.add_var("y", lb=0)
+
+# Objective function
+model.objective = 3*x + 2*y
+
+# Constraints
+model += 2*x + y <= 100
+model += x + y <= 80
+model += x <= 40
+
+# Model will be automatically converted to MPS/LP format'''
+        },
+        
+        "python_mip_integer": {
+            "name": "Integer Programming (Python-MIP)",
+            "description": "IP problem with integer variables using Python-MIP",
+            "code": '''import mip
+
+# Create model
+model = mip.Model("Example_IP", sense=mip.MAXIMIZE)
+
+# Integer decision variables
+x = model.add_var("x", lb=0, var_type=mip.INTEGER)
+y = model.add_var("y", lb=0, var_type=mip.INTEGER)
+
+# Objective function
+model.objective = 3*x + 2*y
+
+# Constraints
+model += 2*x + y <= 100
+model += x + y <= 80
+
+# Model will be automatically converted to MPS/LP format'''
+        },
+        
+        "python_mip_knapsack": {
+            "name": "Knapsack Problem (Python-MIP)",
+            "description": "Classic 0-1 knapsack problem using Python-MIP",
+            "code": '''import mip
+
+# Data
+items = ['item1', 'item2', 'item3', 'item4']
+values = {'item1': 10, 'item2': 40, 'item3': 30, 'item4': 50}
+weights = {'item1': 5, 'item2': 4, 'item3': 6, 'item4': 3}
+capacity = 10
+
+# Create model
+model = mip.Model("Knapsack", sense=mip.MAXIMIZE)
+
+# Binary variables
+x = {}
+for item in items:
+    x[item] = model.add_var(f"x_{item}", var_type=mip.BINARY)
+
+# Objective function
+model.objective = mip.xsum(values[item] * x[item] for item in items)
+
+# Capacity constraint
+model += mip.xsum(weights[item] * x[item] for item in items) <= capacity
+
+# Model will be automatically converted to MPS/LP format'''
         }
     }
     

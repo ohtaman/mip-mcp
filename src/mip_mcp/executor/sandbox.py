@@ -21,7 +21,12 @@ class SecurityChecker:
     
     # File writing methods that should be prohibited
     PROHIBITED_FILE_METHODS = {
-        'writeLP', 'writeMPS', 'write', 'writelines', 'flush', 'close'
+        # PuLP methods
+        'writeLP', 'writeMPS', 
+        # Python-MIP methods
+        'write',
+        # General file operations
+        'writelines', 'flush', 'close'
     }
     
     # Dangerous modules that should not be imported
@@ -34,7 +39,7 @@ class SecurityChecker:
     
     # Allowed modules for optimization
     ALLOWED_MODULES = {
-        'pulp', 'math', 'statistics', 'numpy', 'pandas', 'scipy'
+        'pulp', 'mip', 'math', 'statistics', 'numpy', 'pandas', 'scipy'
     }
     
     def validate_code(self, code: str) -> bool:

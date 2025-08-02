@@ -13,6 +13,7 @@ dependencies = [
     "pulp>=2.7.0",
     "pydantic>=2.0.0",
     "pyyaml>=6.0",
+    "mip>=1.15.0",
 ]
 
 [project.optional-dependencies]
@@ -29,7 +30,8 @@ cloud = [
 ]
 
 [project.scripts]
-mip-mcp = "mip_mcp:main"
+mip-mcp = "mip_mcp:cli"
+mip-mcp-server = "mip_mcp.mcp_server:mcp_main"
 
 [build-system]
 requires = ["hatchling"]
