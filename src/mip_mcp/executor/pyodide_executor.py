@@ -4,11 +4,13 @@ import asyncio
 import builtins
 import contextlib
 import json
+import os
 import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.request import urlretrieve
 
 from ..models.responses import SolverProgress
 from ..utils.library_detector import MIPLibrary, MIPLibraryDetector
@@ -156,11 +158,12 @@ class PyodideExecutor:
         try:
             logger.info("Initializing Pyodide environment...")
 
-            # Find pyodide path first
-            pyodide_path = await self._find_pyodide_path()
+            # Find pyodide path first (with automatic download fallback)
+            pyodide_path = await self._find_or_download_pyodide_path()
             if not pyodide_path:
                 raise RuntimeError(
-                    "Pyodide module not found. Please install: npm install pyodide"
+                    "Pyodide initialization failed: Could not find or download Pyodide. "
+                    "Please ensure internet access or manually install: npm install pyodide"
                 )
 
             logger.info(f"Found Pyodide at: {pyodide_path}")
@@ -291,6 +294,111 @@ try {
         except Exception as e:
             logger.error(f"Failed to find pyodide path: {e}")
             return None
+
+    def _get_pyodide_cache_dir(self) -> Path:
+        """Get the pyodide cache directory."""
+        # Use user data directory for caching
+        if os.name == "nt":  # Windows
+            cache_dir = Path(os.environ.get("APPDATA", "")) / "mip-mcp" / "pyodide"
+        else:  # Unix-like
+            cache_dir = Path.home() / ".cache" / "mip-mcp" / "pyodide"
+
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir
+
+    async def _download_pyodide(self) -> str | None:
+        """Download pyodide from npm registry and cache it."""
+        try:
+            logger.info("Pyodide not found locally, downloading...")
+
+            cache_dir = self._get_pyodide_cache_dir()
+            pyodide_js_path = cache_dir / "pyodide.js"
+
+            # Check if already cached
+            if pyodide_js_path.exists():
+                logger.info(f"Using cached pyodide at: {pyodide_js_path}")
+                return str(pyodide_js_path)
+
+            # Download pyodide package from npm registry
+            npm_url = "https://registry.npmjs.org/pyodide/-/pyodide-0.28.0.tgz"
+            logger.info("Downloading pyodide package...")
+
+            # Download to temporary file
+            with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tmp_file:
+                temp_path = tmp_file.name
+
+            try:
+                # Run download in executor to avoid blocking event loop
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, urlretrieve, npm_url, temp_path)
+
+                # Extract the package
+                logger.info("Extracting pyodide package...")
+                await loop.run_in_executor(
+                    None, self._extract_pyodide_package, temp_path, cache_dir
+                )
+
+                # Verify extraction
+                if pyodide_js_path.exists():
+                    logger.info(
+                        f"Successfully downloaded and cached pyodide at: {pyodide_js_path}"
+                    )
+                    return str(pyodide_js_path)
+                else:
+                    logger.error("Failed to extract pyodide.js from downloaded package")
+                    return None
+
+            finally:
+                # Clean up temporary file
+                with contextlib.suppress(OSError):
+                    Path(temp_path).unlink()
+
+        except Exception as e:
+            logger.error(f"Failed to download pyodide: {e}")
+            return None
+
+    def _extract_pyodide_package(self, tar_path: str, extract_dir: Path) -> None:
+        """Extract pyodide package from tar.gz file."""
+        import tarfile
+
+        with tarfile.open(tar_path, "r:gz") as tar:
+            # Extract only the files we need
+            needed_files = [
+                "package/pyodide.js",
+                "package/pyodide.asm.js",
+                "package/pyodide.asm.wasm",
+                "package/pyodide-lock.json",
+                "package/python_stdlib.zip",
+            ]
+
+            for member in tar.getmembers():
+                if member.name in needed_files:
+                    # Extract to cache directory, removing "package/" prefix
+                    target_name = member.name.replace("package/", "")
+                    member.name = target_name
+                    tar.extract(member, extract_dir)
+
+    async def _find_or_download_pyodide_path(self) -> str | None:
+        """Find pyodide path, downloading if necessary."""
+        # First try to find existing installation
+        path = await self._find_pyodide_path()
+        if path:
+            return path
+
+        # If not found, try to download it
+        logger.info("Pyodide not found in local installations, attempting download...")
+        downloaded_path = await self._download_pyodide()
+
+        if downloaded_path:
+            return downloaded_path
+
+        # If download failed, provide helpful error message
+        logger.error(
+            "Could not find or download pyodide. Please install manually:\n"
+            "  npm install pyodide\n"
+            "Or ensure you have internet access for automatic download."
+        )
+        return None
 
     def _get_pyodide_script(self, pyodide_path: str) -> str:
         """Get the Node.js script for Pyodide execution."""
