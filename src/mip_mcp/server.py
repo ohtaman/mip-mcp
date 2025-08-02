@@ -1,5 +1,7 @@
 """MIP MCP Server implementation."""
 
+import asyncio
+import atexit
 from typing import Any
 
 from fastmcp import Context, FastMCP
@@ -17,6 +19,7 @@ from .models.responses import (
     ValidationResponse,
 )
 from .utils.config_manager import ConfigManager
+from .utils.executor_registry import ExecutorRegistry
 from .utils.logger import get_logger, setup_logging
 
 logger = get_logger(__name__)
@@ -41,12 +44,53 @@ class MIPMCPServer:
         # Initialize FastMCP app
         self.app = FastMCP("mip-mcp")
 
+        # Setup cleanup hooks
+        self._setup_cleanup_hooks()
+
         # Register MCP tools
         self._register_tools()
 
         logger.info(
             f"MIP MCP Server initialized (version: {self.config.server.version})"
         )
+
+    def _setup_cleanup_hooks(self):
+        """Setup cleanup hooks that work with FastMCP's natural shutdown."""
+
+        # Register atexit handler as the main cleanup mechanism
+        def atexit_cleanup():
+            """Clean up executors when the process exits."""
+            try:
+                # Check if there are active executors
+                active_count = ExecutorRegistry.get_active_count()
+                if active_count > 0:
+                    print(f"Cleaning up {active_count} active executor(s)...")
+                    logger.info(
+                        f"Cleaning up {active_count} active executors during shutdown..."
+                    )
+
+                    try:
+                        # Create new event loop for cleanup if needed
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            loop.run_until_complete(
+                                ExecutorRegistry.cleanup_all(silent=False)
+                            )
+                            print("Cleanup completed successfully")
+                            logger.info("Cleanup completed successfully")
+                        finally:
+                            loop.close()
+                    except Exception as e:
+                        print(f"Warning: Cleanup error: {e}")
+                        logger.warning(f"Cleanup error: {e}")
+                else:
+                    logger.debug("No active executors to clean up")
+            except Exception as e:
+                # Suppress all exceptions during atexit to avoid ugly tracebacks
+                logger.debug(f"Atexit cleanup error (suppressed): {e}")
+
+        atexit.register(atexit_cleanup)
 
     def _register_tools(self):
         """Register MCP tools with the FastMCP app."""
@@ -138,13 +182,6 @@ class MIPMCPServer:
 
     def run(self, show_banner: bool = True):
         """Run the MCP server."""
-        try:
-            logger.info("Starting MIP MCP Server...")
-            self.app.run(show_banner=show_banner)
-        except KeyboardInterrupt:
-            logger.info("Server stopped by user")
-        except Exception as e:
-            logger.error(f"Server error: {e}")
-            raise
-        finally:
-            logger.info("MIP MCP Server shutdown complete")
+        logger.info("Starting MIP MCP Server...")
+        # Let FastMCP handle signals and shutdown naturally
+        self.app.run(show_banner=show_banner)

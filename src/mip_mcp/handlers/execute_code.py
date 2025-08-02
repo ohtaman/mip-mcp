@@ -23,6 +23,7 @@ from ..models.responses import (
 )
 from ..models.solution import SolutionValidation
 from ..solvers.factory import SolverFactory
+from ..utils.executor_registry import ExecutorRegistry
 from ..utils.logger import get_logger
 from ..utils.solution_validator import SolutionValidator
 
@@ -423,9 +424,11 @@ async def execute_mip_code_with_progress(
         except Exception as e:
             logger.warning(f"Failed to queue progress update: {e}")
 
+    executor = None
     try:
         # Always use Pyodide executor for security
         executor = PyodideExecutor(config)
+        await ExecutorRegistry.register(executor)
         logger.info("Using Pyodide executor for secure execution")
 
         # Set up progress callback for executor (modeling stage)
@@ -613,6 +616,16 @@ async def execute_mip_code_with_progress(
             stderr="",
             solution=None,
         )
+    finally:
+        # Ensure executor cleanup in all cases
+        if executor:
+            try:
+                await executor.cleanup()
+                logger.debug("Executor cleanup completed in finally block")
+            except Exception as cleanup_error:
+                logger.warning(f"Error during executor cleanup: {cleanup_error}")
+            finally:
+                await ExecutorRegistry.unregister(executor)
 
 
 async def get_solver_info_handler(
