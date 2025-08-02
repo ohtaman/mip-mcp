@@ -9,6 +9,7 @@ from .models.responses import ExecutionResponse, SolverInfoResponse, ValidationR
 
 from .handlers.execute_code import (
     execute_mip_code_handler,
+    execute_mip_code_with_mcp_progress,
     get_solver_info_handler,
     validate_mip_code_handler,
     get_mip_examples_handler
@@ -74,8 +75,9 @@ class MIPMCPServer:
             Returns:
                 Optimization results including solution status, objective value, and variable values.
             """
-            return await execute_mip_code_handler(
+            return await execute_mip_code_with_mcp_progress(
                 code=code,
+                mcp_context=ctx,
                 data=data,
                 solver_params=solver_params,
                 validate_solution=validate_solution,

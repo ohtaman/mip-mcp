@@ -4,12 +4,14 @@ import asyncio
 import json
 import tempfile
 import os
-from typing import Dict, Any, Optional, Tuple, Union
+import time
+from typing import Dict, Any, Optional, Tuple, Union, Callable
 from pathlib import Path
 
 from ..utils.library_detector import MIPLibraryDetector, MIPLibrary
 from ..utils.logger import get_logger
 from ..exceptions import SecurityError
+from ..models.responses import SolverProgress
 
 logger = get_logger(__name__)
 
@@ -27,8 +29,112 @@ class PyodideExecutor:
         self.pyodide_process = None
         self.detector = MIPLibraryDetector()
         self._pyodide_initialized = False
+        self.progress_callback: Optional[Callable[[SolverProgress], None]] = None
+        self._progress_queue: Optional[asyncio.Queue] = None
+        self.start_time: float = 0.0
+        self.progress_interval: float = config.get("progress_interval", 10.0)  # Progress update interval
+        self.execution_timeout: float = config.get("execution_timeout", 60.0)  # Execution timeout for MCP
         
         logger.info("Pyodide executor initialized")
+    
+    def set_progress_callback(self, callback: Optional[Callable[[SolverProgress], None]]) -> None:
+        """Set progress callback function.
+        
+        Args:
+            callback: Function to call with progress updates
+        """
+        self.progress_callback = callback
+    
+    def _send_progress(self, stage: str, message: Optional[str] = None) -> None:
+        """Send progress update if callback is set."""
+        if not self.progress_callback:
+            return
+        
+        try:
+            time_elapsed = time.time() - self.start_time
+            
+            progress = SolverProgress(
+                stage=stage,
+                time_elapsed=time_elapsed,
+                message=message
+            )
+            
+            # Queue progress for async processing if queue is available
+            if self._progress_queue:
+                try:
+                    self._progress_queue.put_nowait(progress)
+                except asyncio.QueueFull:
+                    logger.warning("Progress queue is full, skipping update")
+            else:
+                # Fallback to direct call (may cause RuntimeWarning if async)
+                if asyncio.iscoroutinefunction(self.progress_callback):
+                    # Create task for async callback
+                    asyncio.create_task(self.progress_callback(progress))
+                else:
+                    self.progress_callback(progress)
+            
+        except Exception as e:
+            logger.warning(f"Failed to send progress update: {e}")
+    
+    async def _execute_with_periodic_progress(self, code_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute Pyodide code with periodic progress updates during long-running operations.
+        
+        Args:
+            code_data: Code execution data for Pyodide
+            
+        Returns:
+            Execution result dictionary
+            
+        Raises:
+            TimeoutError: If execution exceeds timeout limit
+        """
+        # Start execution in background
+        execution_task = asyncio.create_task(self._communicate_with_pyodide(code_data))
+        
+        start_time = time.time()
+        last_progress_time = start_time
+        execution_time = 0.0
+        
+        # Monitor execution with periodic progress updates
+        while not execution_task.done():
+            current_time = time.time()
+            execution_time = current_time - start_time
+            
+            # Check if Pyodide process is still alive
+            if self.pyodide_process and self.pyodide_process.returncode is not None:
+                # Process has terminated
+                break
+            
+            # Check for timeout
+            if execution_time > self.execution_timeout:
+                # Kill the process if it's still running
+                if self.pyodide_process and self.pyodide_process.returncode is None:
+                    self.pyodide_process.terminate()
+                    try:
+                        await asyncio.wait_for(self.pyodide_process.wait(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        self.pyodide_process.kill()
+                
+                execution_task.cancel()
+                try:
+                    await execution_task
+                except asyncio.CancelledError:
+                    pass
+                raise TimeoutError(f"Code execution exceeded timeout limit of {self.execution_timeout} seconds")
+            
+            # Send periodic progress update (only if process is still alive)
+            if current_time - last_progress_time >= self.progress_interval:
+                self._send_progress(
+                    "modeling", 
+                    f"Code executing... ({execution_time:.1f}s elapsed, process running)"
+                )
+                last_progress_time = current_time
+            
+            # Wait for progress interval before checking again
+            await asyncio.sleep(self.progress_interval)
+        
+        # Get the final result
+        return await execution_task
     
     async def _initialize_pyodide(self) -> None:
         """Initialize Pyodide environment (lazy loading)."""
@@ -298,7 +404,7 @@ console.error('DEBUG: Node.js process ready for commands');
             # Read response with timeout
             response_line = await asyncio.wait_for(
                 self.pyodide_process.stdout.readline(),
-                timeout=30.0  # 30 second timeout
+                timeout=self.execution_timeout + 10.0  # Allow for execution + margin
             )
             response_str = response_line.decode().strip()
             
@@ -342,10 +448,20 @@ console.error('DEBUG: Node.js process ready for commands');
             Tuple of (stdout, stderr, file_path, detected_library).
             File format is automatically detected (LP preferred, then MPS).
         """
+        # Initialize timing
+        self.start_time = time.time()
+        
+        # Send initial progress
+        self._send_progress("modeling", "Initializing Pyodide environment")
+        
         await self._initialize_pyodide()
+        
+        # Send progress for library detection
+        self._send_progress("modeling", "Detecting MIP library")
         
         # Detect library (only PuLP supported)
         detected_library = self.detector.detect_library(code)
+        
         
         if detected_library == MIPLibrary.UNKNOWN:
             return "", "Unknown or unsupported MIP library", None, MIPLibrary.UNKNOWN
@@ -355,17 +471,26 @@ console.error('DEBUG: Node.js process ready for commands');
             return "", f"Library {detected_library.value} not supported in Pyodide yet", None, detected_library
         
         try:
+            # Send progress for code preparation
+            self._send_progress("modeling", "Preparing code for execution")
+            
             # Prepare execution code
             execution_code = self._prepare_execution_code(code, data)
             
-            # Execute in Pyodide
-            result = await self._communicate_with_pyodide({
+            # Send progress for execution
+            self._send_progress("modeling", "Executing PuLP code and generating optimization model")
+            
+            # Execute in Pyodide with periodic progress monitoring
+            result = await self._execute_with_periodic_progress({
                 "action": "execute",
                 "code": execution_code
             })
             
             if not result.get("success"):
                 return "", result.get("error", "Unknown execution error"), None, detected_library
+            
+            # Send progress for result extraction
+            self._send_progress("modeling", "Extracting optimization file content")
             
             # Extract results
             globals_dict = result.get("globals", {})
@@ -387,14 +512,24 @@ console.error('DEBUG: Node.js process ready for commands');
             if not content:
                 return "", "No optimization file content generated", None, detected_library
             
+            # Send progress for file generation
+            self._send_progress("modeling", f"Generating {file_format.upper()} optimization file")
+            
             # Write content to temporary file
             temp_file = self._create_temp_file(content, file_format)
+            
+            # Send final modeling progress
+            self._send_progress("modeling", f"Optimization model generated successfully ({file_format.upper()} format)")
             
             # Get execution output
             stdout = globals_dict.get("__stdout__", "Code executed successfully in Pyodide")
             
             return stdout, "", temp_file, detected_library
             
+        except TimeoutError as e:
+            logger.error(f"Pyodide execution timed out: {e}")
+            return "", f"Execution timed out: {e}", None, detected_library
+        
         except Exception as e:
             logger.error(f"Pyodide execution failed: {e}")
             return "", f"Execution failed: {e}", None, detected_library

@@ -2,7 +2,9 @@
 
 import os
 import tempfile
-from typing import Dict, Any, Optional
+import time
+import asyncio
+from typing import Dict, Any, Optional, AsyncGenerator, Callable
 from pathlib import Path
 
 try:
@@ -12,6 +14,7 @@ except ImportError:
 
 from .base import BaseSolver, SolverError
 from ..models.solution import OptimizationSolution
+from ..models.responses import SolverProgress, ProgressResponse
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -32,6 +35,114 @@ class SCIPSolver(BaseSolver):
             raise SolverError("pyscipopt is not available")
         
         self.model = None
+        self.progress_callback: Optional[Callable[[SolverProgress], None]] = None
+        self.last_progress_time: float = 0.0
+        self.progress_interval: float = 2.0  # Minimum 2 seconds between progress updates
+        self.start_time: float = 0.0
+    
+    def set_progress_callback(self, callback: Optional[Callable[[SolverProgress], None]]) -> None:
+        """Set progress callback function.
+        
+        Args:
+            callback: Function to call with progress updates
+        """
+        self.progress_callback = callback
+    
+    def _should_send_progress(self) -> bool:
+        """Check if enough time has passed to send progress update."""
+        current_time = time.time()
+        if current_time - self.last_progress_time >= self.progress_interval:
+            self.last_progress_time = current_time
+            return True
+        return False
+    
+    def _send_progress(self, stage: str, message: Optional[str] = None) -> None:
+        """Send progress update if callback is set and enough time has passed."""
+        if not self.progress_callback or not self._should_send_progress():
+            return
+        
+        try:
+            time_elapsed = time.time() - self.start_time
+            
+            # Get solver statistics if model is available and solving
+            nodes_processed = None
+            best_solution = None
+            best_bound = None
+            gap = None
+            gap_percentage = None
+            
+            if self.model and stage == "solving":
+                try:
+                    nodes_processed = self.model.getNNodes()
+                    
+                    # Try to get bounds
+                    try:
+                        best_solution = self.model.getPrimalbound()
+                        if best_solution == float('inf') or best_solution == -float('inf'):
+                            best_solution = None
+                    except:
+                        best_solution = None
+                    
+                    try:
+                        best_bound = self.model.getDualbound()
+                        if best_bound == float('inf') or best_bound == -float('inf'):
+                            best_bound = None
+                    except:
+                        best_bound = None
+                    
+                    try:
+                        gap = self.model.getGap()
+                        if gap != float('inf') and gap >= 0:
+                            gap_percentage = gap * 100.0
+                        else:
+                            gap = None
+                    except:
+                        gap = None
+                        
+                except Exception as e:
+                    logger.debug(f"Could not get solver statistics: {e}")
+            
+            progress = SolverProgress(
+                stage=stage,
+                time_elapsed=time_elapsed,
+                nodes_processed=nodes_processed,
+                best_solution=best_solution,
+                best_bound=best_bound,
+                gap=gap,
+                gap_percentage=gap_percentage,
+                message=message
+            )
+            
+            # Handle async callback properly
+            if asyncio.iscoroutinefunction(self.progress_callback):
+                # Create task for async callback
+                asyncio.create_task(self.progress_callback(progress))
+            else:
+                self.progress_callback(progress)
+            
+        except Exception as e:
+            logger.warning(f"Failed to send progress update: {e}")
+    
+    async def _solve_with_progress_monitoring(self) -> None:
+        """Solve the problem with progress monitoring."""
+        def solve_in_executor():
+            """Run the actual solving in executor."""
+            return self.model.optimize()
+        
+        # Create a task for the actual solving
+        loop = asyncio.get_event_loop()
+        solving_task = loop.run_in_executor(None, solve_in_executor)
+        
+        # Monitor progress while solving
+        while not solving_task.done():
+            self._send_progress("solving", "Optimizing...")
+            await asyncio.sleep(self.progress_interval)
+        
+        # Wait for solving to complete
+        await solving_task
+        
+        # Send final progress
+        self._send_progress("finished", "Optimization completed")
     
     async def solve_from_file(self, file_path: str, capture_output: bool = False) -> OptimizationSolution:
         """Solve optimization problem from MPS or LP file.
@@ -46,6 +157,13 @@ class SCIPSolver(BaseSolver):
         self.validate_file(file_path)
         
         try:
+            # Initialize timing
+            self.start_time = time.time()
+            self.last_progress_time = 0.0
+            
+            # Send initial progress
+            self._send_progress("initializing", "Setting up SCIP model")
+            
             # Create SCIP model with conditional output suppression
             self.model = pyscipopt.Model("MIP_MCP_Problem")
             
@@ -59,6 +177,9 @@ class SCIPSolver(BaseSolver):
             # Set parameters
             self._apply_parameters()
             
+            # Send progress update
+            self._send_progress("initializing", "Loading problem file")
+            
             # Read problem file
             file_path_obj = Path(file_path)
             if file_path_obj.suffix.lower() == '.mps':
@@ -70,8 +191,15 @@ class SCIPSolver(BaseSolver):
             
             logger.info(f"Problem loaded: {self.model.getNVars()} variables, {self.model.getNConss()} constraints")
             
-            # Solve the problem
-            self.model.optimize()
+            # Send presolving progress
+            self._send_progress("presolving", f"Problem loaded: {self.model.getNVars()} variables, {self.model.getNConss()} constraints")
+            
+            # Start solving with progress monitoring
+            self._send_progress("solving", "Starting optimization")
+            
+            # Setup a simple progress monitoring using asyncio
+            solving_task = asyncio.create_task(self._solve_with_progress_monitoring())
+            await solving_task
             
             # Extract solution
             solution = self._extract_solution(capture_output)

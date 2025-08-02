@@ -85,6 +85,27 @@ class ExampleCode(BaseModel):
     library: Optional[str] = Field(description="Library used in the example (pulp or python-mip)")
 
 
+class SolverProgress(BaseModel):
+    """Progress information during optimization solving."""
+    
+    stage: str = Field(description="Current stage: 'modeling', 'initializing', 'presolving', 'solving', 'finished'")
+    time_elapsed: float = Field(description="Time elapsed in seconds")
+    nodes_processed: Optional[int] = Field(default=None, description="Number of branch-and-bound nodes processed")
+    best_solution: Optional[float] = Field(default=None, description="Best primal bound (solution value) found so far")
+    best_bound: Optional[float] = Field(default=None, description="Best dual bound found so far")
+    gap: Optional[float] = Field(default=None, description="Optimality gap (0.0 to 1.0)")
+    gap_percentage: Optional[float] = Field(default=None, description="Optimality gap as percentage")
+    message: Optional[str] = Field(default=None, description="Current status message")
+
+
+class ProgressResponse(BaseModel):
+    """Response containing progress information."""
+    
+    type: str = Field(default="progress", description="Response type for identification")
+    progress: SolverProgress = Field(description="Current solver progress information")
+    is_final: bool = Field(default=False, description="Whether this is the final progress update")
+
+
 class ExamplesResponse(BaseModel):
     """Response from get_mip_examples."""
     
