@@ -53,27 +53,22 @@ class MIPMCPServer:
             validate_solution: bool = True,
             validation_tolerance: float = 1e-6
         ) -> Dict[str, Any]:
-            """Execute MIP code and solve optimization problem.
+            """Execute PuLP optimization code and solve the problem.
             
-            Executes PuLP Python code in a secure Pyodide WebAssembly environment. The code can:
-            - Create optimization problems with variables, constraints, and objectives
-            - Use automatic problem detection (recommended)
-            - Manually set content via __mps_content__ or __lp_content__ variables
-            
-            Security: Always executes in Pyodide WebAssembly sandbox for complete isolation.
-            The system automatically generates MPS/LP files from PuLP problem objects.
-            File format is automatically detected (LP preferred, then MPS).
+            Executes PuLP Python code to create and solve optimization problems:
+            - Define variables, constraints, and objectives
+            - Solve linear and integer programming problems
+            - Get optimal solutions with variable values
             
             Args:
-                code: PuLP Python code to execute
-                data: Optional data dictionary to pass to the code
-                solver_params: Optional solver parameters for SCIP
-                validate_solution: Whether to validate solution against constraints (default: True)
-                validation_tolerance: Numerical tolerance for constraint validation (default: 1e-6)
+                code: PuLP Python code defining the optimization problem
+                data: Optional data dictionary to pass to your code
+                solver_params: Optional solver configuration parameters
+                validate_solution: Whether to validate the solution (default: True)
+                validation_tolerance: Tolerance for constraint validation (default: 1e-6)
                 
             Returns:
-                Execution results and optimization solution from SCIP solver with validation.
-                File format is automatically detected and included in results.
+                Optimization results including solution status, objective value, and variable values.
             """
             return await execute_mip_code_handler(
                 code=code,
@@ -86,10 +81,10 @@ class MIPMCPServer:
         
         @self.app.tool()
         async def get_solver_info(ctx: Context) -> Dict[str, Any]:
-            """Get information about available solvers.
+            """Get information about the optimization solver.
             
             Returns:
-                Solver information and capabilities
+                Solver name, version, and supported problem types.
             """
             return await get_solver_info_handler(
                 config=self.config_manager.config.model_dump()
@@ -100,19 +95,15 @@ class MIPMCPServer:
             ctx: Context,
             code: str
         ) -> Dict[str, Any]:
-            """Validate MIP code for security and syntax.
+            """Validate PuLP code before execution.
             
-            Performs security validation including:
-            - PuLP library detection
-            - Syntax error checking
-            - Pyodide compatibility validation
-            - Security analysis
+            Checks code for syntax errors and potential issues before running.
             
             Args:
                 code: PuLP Python code to validate
                 
             Returns:
-                Validation results with status and any security issues found
+                Validation status and any issues found.
             """
             return await validate_mip_code_handler(
                 code=code,
@@ -121,26 +112,24 @@ class MIPMCPServer:
         
         @self.app.tool()
         async def get_mip_examples(ctx: Context) -> Dict[str, Any]:
-            """Get example MIP code snippets.
+            """Get example optimization code snippets.
             
-            Provides various MIP code examples demonstrating:
-            - Linear programming problems (PuLP, Python-MIP)
+            Provides ready-to-use PuLP examples:
+            - Linear programming problems
             - Integer programming problems  
-            - Knapsack problems
-            - Automatic problem detection (no file writing required)
-            - Manual content setting via variables (advanced usage)
+            - Common optimization scenarios
             
             Returns:
-                Dictionary with categorized example code snippets and descriptions
+                Example code snippets with descriptions.
             """
             return await get_mip_examples_handler()
         
         @self.app.tool()
         async def health_check(ctx: Context) -> Dict[str, Any]:
-            """Health check endpoint.
+            """Check if the server is running properly.
             
             Returns:
-                Server health status
+                Server status and version information.
             """
             try:
                 # Test solver availability
