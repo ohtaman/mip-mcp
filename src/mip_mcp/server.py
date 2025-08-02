@@ -52,6 +52,7 @@ class MIPMCPServer:
             ctx: Context,
             code: str,
             data: Optional[Dict[str, Any]] = None,
+            solver: Optional[str] = None,
             solver_params: Optional[Dict[str, Any]] = None,
             validate_solution: bool = True,
             validation_tolerance: float = 1e-6,
@@ -67,6 +68,7 @@ class MIPMCPServer:
             Args:
                 code: PuLP Python code defining the optimization problem
                 data: Optional data dictionary to pass to your code
+                solver: Solver to use (default: from config, fallback: "scip")
                 solver_params: Optional solver configuration parameters
                 validate_solution: Whether to validate the solution (default: True)
                 validation_tolerance: Tolerance for constraint validation (default: 1e-6)
@@ -79,6 +81,7 @@ class MIPMCPServer:
                 code=code,
                 mcp_context=ctx,
                 data=data,
+                solver=solver,
                 solver_params=solver_params,
                 validate_solution=validate_solution,
                 validation_tolerance=validation_tolerance,

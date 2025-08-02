@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ..executor.pyodide_executor import PyodideExecutor
 from ..exceptions import CodeExecutionError, SecurityError
-from ..solvers.scip_solver import SCIPSolver
+from ..solvers.factory import SolverFactory
 from ..models.solution import OptimizationSolution, SolutionValidation
 from ..models.responses import ExecutionResponse, SolverInfoResponse, ValidationResponse, ExamplesResponse, SolverInfo, ValidationIssue, ExampleCode, ProgressResponse, SolverProgress
 from ..utils.solution_validator import SolutionValidator
@@ -45,6 +45,7 @@ def suppress_stdout_for_mcp():
 async def execute_mip_code_handler(
     code: str,
     data: Optional[Dict[str, Any]] = None,
+    solver: Optional[str] = None,
     solver_params: Optional[Dict[str, Any]] = None,
     validate_solution: bool = True,
     validation_tolerance: float = 1e-6,
@@ -56,6 +57,7 @@ async def execute_mip_code_handler(
     Args:
         code: PuLP Python code to execute
         data: Optional data dictionary to pass to the code
+        solver: Solver to use (default: from config, fallback: "scip")
         solver_params: Optional solver parameters
         validate_solution: Whether to validate solution against constraints
         validation_tolerance: Numerical tolerance for constraint validation
@@ -69,7 +71,7 @@ async def execute_mip_code_handler(
     """
     # Use the non-streaming version for regular MCP calls
     async for result in execute_mip_code_with_progress(
-        code, data, solver_params, validate_solution, validation_tolerance, 
+        code, data, solver, solver_params, validate_solution, validation_tolerance, 
         include_solver_output, config
     ):
         if isinstance(result, ExecutionResponse):
@@ -89,6 +91,7 @@ async def execute_mip_code_with_mcp_progress(
     code: str,
     mcp_context,  # FastMCP Context object
     data: Optional[Dict[str, Any]] = None,
+    solver: Optional[str] = None,
     solver_params: Optional[Dict[str, Any]] = None,
     validate_solution: bool = True,
     validation_tolerance: float = 1e-6,
@@ -101,6 +104,7 @@ async def execute_mip_code_with_mcp_progress(
         code: PuLP Python code to execute
         mcp_context: FastMCP Context for progress reporting
         data: Optional data dictionary to pass to the code
+        solver: Solver to use (default: from config, fallback: "scip")
         solver_params: Optional solver parameters
         validate_solution: Whether to validate solution against constraints
         validation_tolerance: Numerical tolerance for constraint validation
@@ -161,14 +165,19 @@ async def execute_mip_code_with_mcp_progress(
         # Set up progress callback for executor (modeling stage)
         executor.set_progress_callback(mcp_progress_callback)
         
-        solver = SCIPSolver(config.get("solvers", {}))
+        # Determine which solver to use
+        solver_name = solver or config.get("solvers", {}).get("default", "scip")
+        solver_config = config.get("solvers", {})
+        
+        # Create solver using factory
+        solver_instance = SolverFactory.create_solver(solver_name, solver_config)
         
         # Set up progress callback for solver
-        solver.set_progress_callback(mcp_progress_callback)
+        solver_instance.set_progress_callback(mcp_progress_callback)
         
         # Apply solver parameters if provided
         if solver_params:
-            solver.set_parameters(solver_params)
+            solver_instance.set_parameters(solver_params)
         
         # Progress update: starting code execution
         await mcp_progress_callback(SolverProgress(
@@ -208,7 +217,7 @@ async def execute_mip_code_with_mcp_progress(
             # Use solver's internal summary generation (safe for MCP)
             logger.info("Capturing solver output using internal summary generation")
             with suppress_stdout_for_mcp():
-                solution = await solver.solve_from_file(file_path, capture_output=True)
+                solution = await solver_instance.solve_from_file(file_path, capture_output=True)
             
             # Extract solver output from solution's solver_info
             if hasattr(solution, 'solver_info') and solution.solver_info:
@@ -220,7 +229,7 @@ async def execute_mip_code_with_mcp_progress(
         else:
             # Suppress output for clean MCP protocol
             with suppress_stdout_for_mcp():
-                solution = await solver.solve_from_file(file_path, capture_output=False)
+                solution = await solver_instance.solve_from_file(file_path, capture_output=False)
         
         # Validate solution if requested and solution is optimal
         if validate_solution and solution.is_optimal:
@@ -268,7 +277,7 @@ async def execute_mip_code_with_mcp_progress(
             file_format="auto",
             library_used=detected_library.value,
             executor_used="pyodide",
-            solver_info=solver.get_solver_info(),
+            solver_info=solver_instance.get_solver_info(),
             solver_output=solver_output_captured
         )
         
@@ -336,6 +345,7 @@ async def execute_mip_code_with_mcp_progress(
 async def execute_mip_code_with_progress(
     code: str,
     data: Optional[Dict[str, Any]] = None,
+    solver: Optional[str] = None,
     solver_params: Optional[Dict[str, Any]] = None,
     validate_solution: bool = True,
     validation_tolerance: float = 1e-6,
@@ -347,6 +357,7 @@ async def execute_mip_code_with_progress(
     Args:
         code: PuLP Python code to execute
         data: Optional data dictionary to pass to the code
+        solver: Solver to use (default: from config, fallback: "scip")
         solver_params: Optional solver parameters
         validate_solution: Whether to validate solution against constraints
         validation_tolerance: Numerical tolerance for constraint validation
@@ -377,14 +388,19 @@ async def execute_mip_code_with_progress(
         # Set up progress callback for executor (modeling stage)
         executor.set_progress_callback(progress_callback)
         
-        solver = SCIPSolver(config.get("solvers", {}))
+        # Determine which solver to use
+        solver_name = solver or config.get("solvers", {}).get("default", "scip")
+        solver_config = config.get("solvers", {})
+        
+        # Create solver using factory
+        solver_instance = SolverFactory.create_solver(solver_name, solver_config)
         
         # Set up progress callback for solver
-        solver.set_progress_callback(progress_callback)
+        solver_instance.set_progress_callback(progress_callback)
         
         # Apply solver parameters if provided
         if solver_params:
-            solver.set_parameters(solver_params)
+            solver_instance.set_parameters(solver_params)
         
         logger.info("Executing PuLP code in Pyodide sandbox")
         
@@ -413,7 +429,7 @@ async def execute_mip_code_with_progress(
                 # Use solver's internal summary generation (safe for MCP)
                 logger.info("Capturing solver output using internal summary generation")
                 with suppress_stdout_for_mcp():
-                    solution = await solver.solve_from_file(file_path, capture_output=True)
+                    solution = await solver_instance.solve_from_file(file_path, capture_output=True)
                 
                 # Extract solver output from solution's solver_info
                 if hasattr(solution, 'solver_info') and solution.solver_info:
@@ -425,7 +441,7 @@ async def execute_mip_code_with_progress(
             else:
                 # Suppress output for clean MCP protocol
                 with suppress_stdout_for_mcp():
-                    solution = await solver.solve_from_file(file_path, capture_output=False)
+                    solution = await solver_instance.solve_from_file(file_path, capture_output=False)
             
             return solution, solver_output_captured
         
@@ -502,33 +518,13 @@ async def execute_mip_code_with_progress(
             file_format="auto",
             library_used=detected_library.value,
             executor_used="pyodide",
-            solver_info=solver.get_solver_info(),
+            solver_info=solver_instance.get_solver_info(),
             solver_output=solver_output_captured
         )
         
         logger.info(f"Optimization completed: {solution.status}")
         yield response
         
-    except Exception as e:
-        # Clean up Pyodide if needed
-        try:
-            if 'executor' in locals() and hasattr(executor, 'cleanup'):
-                await executor.cleanup()
-        except:
-            pass
-        
-        if "security" in str(e).lower():
-            logger.error(f"Security error: {e}")
-            yield ExecutionResponse(
-                status="security_error",
-                message=f"Code contains security violations: {e}",
-                stdout="",
-                stderr="",
-                solution=None
-            )
-        else:
-            raise
-    
     except SecurityError as e:
         logger.error(f"Security error: {e}")
         yield ExecutionResponse(
@@ -570,15 +566,31 @@ async def get_solver_info_handler(config: Optional[Dict[str, Any]] = None) -> So
         Dictionary with solver information
     """
     try:
-        solver = SCIPSolver(config.get("solvers", {}) if config else {})
-        solver_info = solver.get_solver_info()
+        config = config or {}
+        solver_config = config.get("solvers", {})
+        default_solver = solver_config.get("default", "scip")
+        
+        # Get information for all available solvers
+        available_solvers = SolverFactory.get_available_solvers()
+        solvers_info = {}
+        
+        for solver_name in available_solvers:
+            try:
+                solver_instance = SolverFactory.create_solver(solver_name, solver_config)
+                solver_info = solver_instance.get_solver_info()
+                solvers_info[solver_name] = SolverInfo(**solver_info)
+            except Exception as e:
+                # If solver creation fails, still include it with error info
+                solvers_info[solver_name] = SolverInfo(
+                    name=solver_name,
+                    available=False,
+                    error=str(e)
+                )
         
         return SolverInfoResponse(
             status="success",
-            solvers={
-                "scip": SolverInfo(**solver_info)
-            },
-            default_solver="scip"
+            solvers=solvers_info,
+            default_solver=default_solver
         )
     
     except Exception as e:

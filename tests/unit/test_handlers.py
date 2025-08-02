@@ -33,10 +33,11 @@ class TestExecuteCodeHandler:
                 "timeout": 30,
                 "memory_limit": "512MB"
             },
-            "solver": {
-                "scip": {
-                    "time_limit": 300,
-                    "gap_limit": 0.01
+            "solvers": {
+                "default": "scip",
+                "timeout": 3600,
+                "parameters": {
+                    "limits/gap": 0.01
                 }
             }
         }
@@ -80,7 +81,7 @@ class TestExecuteCodeHandler:
         mock_solver.set_progress_callback = Mock()  # Make it synchronous
         
         with patch('mip_mcp.handlers.execute_code.PyodideExecutor', return_value=mock_executor):
-            with patch('mip_mcp.handlers.execute_code.SCIPSolver', return_value=mock_solver):
+            with patch('mip_mcp.handlers.execute_code.SolverFactory.create_solver', return_value=mock_solver):
                 result = await execute_mip_code_handler(
                     code=SIMPLE_LP,
                     config=handler_config
@@ -129,7 +130,7 @@ class TestExecuteCodeHandler:
         mock_solver.set_progress_callback = Mock()
         
         with patch('mip_mcp.handlers.execute_code.PyodideExecutor', return_value=mock_executor):
-            with patch('mip_mcp.handlers.execute_code.SCIPSolver', return_value=mock_solver):
+            with patch('mip_mcp.handlers.execute_code.SolverFactory.create_solver', return_value=mock_solver):
                 result = await execute_mip_code_handler(
                     code=SIMPLE_LP,
                     data=test_data,
@@ -189,7 +190,7 @@ class TestExecuteCodeHandler:
         ))
         
         with patch('mip_mcp.handlers.execute_code.PyodideExecutor', return_value=mock_executor):
-            with patch('mip_mcp.handlers.execute_code.SCIPSolver', return_value=mock_solver):
+            with patch('mip_mcp.handlers.execute_code.SolverFactory.create_solver', return_value=mock_solver):
                 result = await execute_mip_code_handler(
                     code=SIMPLE_LP,
                     config=handler_config
@@ -224,7 +225,7 @@ class TestExecuteCodeHandler:
         solver_output = "SCIP optimization completed successfully\\nObjective: 9.0"
         
         with patch('mip_mcp.handlers.execute_code.PyodideExecutor', return_value=mock_executor):
-            with patch('mip_mcp.handlers.execute_code.SCIPSolver', return_value=mock_solver):
+            with patch('mip_mcp.handlers.execute_code.SolverFactory.create_solver', return_value=mock_solver):
                 with patch('mip_mcp.handlers.execute_code.SCIPSolver.capture_solver_output', return_value=solver_output):
                     result = await execute_mip_code_handler(
                         code=SIMPLE_LP,
@@ -279,7 +280,7 @@ class TestExecuteCodeHandler:
         ))
         
         with patch('mip_mcp.handlers.execute_code.PyodideExecutor', side_effect=mock_executor_with_progress):
-            with patch('mip_mcp.handlers.execute_code.SCIPSolver', return_value=mock_solver):
+            with patch('mip_mcp.handlers.execute_code.SolverFactory.create_solver', return_value=mock_solver):
                 result = await execute_mip_code_with_mcp_progress(
                     code=SIMPLE_LP,
                     mcp_context=mock_context,
@@ -303,8 +304,9 @@ class TestExecuteCodeHandler:
             "capabilities": ["Linear Programming", "Integer Programming"]
         }
         
-        with patch('mip_mcp.handlers.execute_code.SCIPSolver', return_value=mock_solver):
-            result = await get_solver_info_handler(config=handler_config)
+        with patch('mip_mcp.handlers.execute_code.SolverFactory.get_available_solvers', return_value=["scip"]):
+            with patch('mip_mcp.handlers.execute_code.SolverFactory.create_solver', return_value=mock_solver):
+                result = await get_solver_info_handler(config=handler_config)
         
         assert isinstance(result, SolverInfoResponse)
         assert result.solvers["scip"].name == "SCIP"
@@ -420,7 +422,7 @@ class TestExecuteCodeHandler:
         ))
         
         with patch('mip_mcp.handlers.execute_code.PyodideExecutor', return_value=mock_executor):
-            with patch('mip_mcp.handlers.execute_code.SCIPSolver', return_value=mock_solver):
+            with patch('mip_mcp.handlers.execute_code.SolverFactory.create_solver', return_value=mock_solver):
                 with patch('mip_mcp.handlers.execute_code.SolutionValidator', return_value=mock_validator):
                     result = await execute_mip_code_handler(
                         code=SIMPLE_LP,
@@ -432,3 +434,147 @@ class TestExecuteCodeHandler:
         assert result.status == "success"
         assert result.validation is not None
         assert not result.validation["is_valid"]
+
+    @pytest.mark.asyncio
+    async def test_execute_mip_code_handler_with_solver_selection(self, handler_config):
+        """Test code execution with explicit solver selection."""
+        mock_executor = Mock()
+        mock_executor.execute_mip_code = AsyncMock(return_value=(
+            "Problem solved with SCIP",  # stdout
+            "",  # stderr
+            "/tmp/solver_test.lp",  # file_path
+            MIPLibrary.PULP  # detected_library
+        ))
+        mock_executor.set_progress_callback = Mock()
+        
+        mock_solver = Mock()
+        mock_solver.solve_from_file = AsyncMock(return_value=Mock(
+            status="optimal",
+            objective_value=10.0,
+            variables={"x": 2.0, "y": 3.0},
+            solve_time=1.5,
+            solver_info={"solver_name": "SCIP", "version": "8.0.3"},
+            is_optimal=True,
+            model_dump=lambda: {
+                "status": "optimal",
+                "objective_value": 10.0,
+                "variables": {"x": 2.0, "y": 3.0}
+            }
+        ))
+        mock_solver.get_solver_info.return_value = {
+            "name": "SCIP",
+            "version": "8.0.3",
+            "available": True
+        }
+        mock_solver.set_progress_callback = Mock()
+        mock_solver.set_parameters = Mock()
+        
+        # Test with explicit SCIP solver
+        with patch('mip_mcp.handlers.execute_code.PyodideExecutor', return_value=mock_executor):
+            with patch('mip_mcp.handlers.execute_code.SolverFactory.create_solver', return_value=mock_solver) as mock_factory:
+                result = await execute_mip_code_handler(
+                    code=SIMPLE_LP,
+                    solver="scip",  # Explicitly specify solver
+                    config=handler_config
+                )
+        
+        assert isinstance(result, ExecutionResponse)
+        assert result.status == "success"
+        assert result.solution["status"] == "optimal"
+        assert result.solution["objective_value"] == 10.0
+        
+        # Verify solver factory was called with correct solver name
+        mock_factory.assert_called_once_with("scip", handler_config["solvers"])
+
+    @pytest.mark.asyncio
+    async def test_execute_mip_code_handler_default_solver(self, handler_config):
+        """Test code execution uses default solver when not specified."""
+        mock_executor = Mock()
+        mock_executor.execute_mip_code = AsyncMock(return_value=(
+            "Problem solved with default solver",  # stdout
+            "",  # stderr
+            "/tmp/default_solver_test.lp",  # file_path
+            MIPLibrary.PULP  # detected_library
+        ))
+        mock_executor.set_progress_callback = Mock()
+        
+        mock_solver = Mock()
+        mock_solver.solve_from_file = AsyncMock(return_value=Mock(
+            status="optimal",
+            objective_value=8.0,
+            variables={"x": 4.0},
+            solve_time=2.0,
+            solver_info={"solver_name": "SCIP", "version": "8.0.3"},
+            is_optimal=True,
+            model_dump=lambda: {
+                "status": "optimal",
+                "objective_value": 8.0,
+                "variables": {"x": 4.0}
+            }
+        ))
+        mock_solver.get_solver_info.return_value = {
+            "name": "SCIP",
+            "version": "8.0.3",
+            "available": True
+        }
+        mock_solver.set_progress_callback = Mock()
+        mock_solver.set_parameters = Mock()
+        
+        # Test without specifying solver (should use default)
+        with patch('mip_mcp.handlers.execute_code.PyodideExecutor', return_value=mock_executor):
+            with patch('mip_mcp.handlers.execute_code.SolverFactory.create_solver', return_value=mock_solver) as mock_factory:
+                result = await execute_mip_code_handler(
+                    code=SIMPLE_LP,
+                    # solver parameter not specified
+                    config=handler_config
+                )
+        
+        assert isinstance(result, ExecutionResponse)
+        assert result.status == "success"
+        
+        # Verify solver factory was called with default solver
+        mock_factory.assert_called_once_with("scip", handler_config["solvers"])
+
+    @pytest.mark.asyncio
+    async def test_execute_mip_code_handler_invalid_solver(self, handler_config):
+        """Test error handling for invalid solver selection."""
+        mock_executor = Mock()
+        mock_executor.set_progress_callback = Mock()
+        
+        # Test with invalid solver name
+        with patch('mip_mcp.handlers.execute_code.PyodideExecutor', return_value=mock_executor):
+            with patch('mip_mcp.handlers.execute_code.SolverFactory.create_solver', side_effect=ValueError("Unsupported solver: invalid_solver")):
+                result = await execute_mip_code_handler(
+                    code=SIMPLE_LP,
+                    solver="invalid_solver",
+                    config=handler_config
+                )
+        
+        assert isinstance(result, ExecutionResponse)
+        assert result.status == "error"
+        assert "An unexpected error occurred" in result.message
+        assert "Unsupported solver: invalid_solver" in result.message
+
+    @pytest.mark.asyncio
+    async def test_get_solver_info_handler_multiple_solvers(self, handler_config):
+        """Test getting information for all available solvers."""
+        mock_scip_solver = Mock()
+        mock_scip_solver.get_solver_info.return_value = {
+            "name": "SCIP",
+            "version": "8.0.3",
+            "available": True,
+            "capabilities": ["LP", "MIP", "MINLP"],
+            "file_formats": ["mps", "lp"]
+        }
+        
+        with patch('mip_mcp.handlers.execute_code.SolverFactory.get_available_solvers', return_value=["scip"]):
+            with patch('mip_mcp.handlers.execute_code.SolverFactory.create_solver', return_value=mock_scip_solver):
+                result = await get_solver_info_handler(config=handler_config)
+        
+        assert isinstance(result, SolverInfoResponse)
+        assert result.status == "success"
+        assert result.default_solver == "scip"
+        assert "scip" in result.solvers
+        assert result.solvers["scip"].name == "SCIP"
+        assert result.solvers["scip"].available is True
+        assert "LP" in result.solvers["scip"].capabilities
