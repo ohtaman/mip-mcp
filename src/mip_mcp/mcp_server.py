@@ -17,7 +17,6 @@ def mcp_main():
     def shutdown_handler(signum, frame):
         print(f"\nReceived signal {signum}, shutting down...", file=sys.stderr)
         sys.exit(0)
-    
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
 

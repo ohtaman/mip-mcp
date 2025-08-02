@@ -1,7 +1,7 @@
 """Tests for subprocess cleanup and signal handling."""
 
 import asyncio
-import signal
+import contextlib
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -269,27 +269,26 @@ class TestServerSignalHandling:
     def test_atexit_cleanup_with_active_executors(self):
         """Test atexit cleanup when there are active executors."""
         server = MIPMCPServer()
-        
+
         # Mock ExecutorRegistry to simulate active executors
         with (
             patch.object(ExecutorRegistry, 'get_active_count', return_value=2),
-            patch.object(ExecutorRegistry, 'cleanup_all', return_value=None) as mock_cleanup,
+            patch.object(ExecutorRegistry, 'cleanup_all', return_value=None),
             patch('asyncio.new_event_loop') as mock_new_loop,
             patch('asyncio.set_event_loop') as mock_set_loop,
         ):
             # Create mock loop
             mock_loop = MagicMock()
             mock_new_loop.return_value = mock_loop
-            
+
             # Get the atexit cleanup function and call it
-            import atexit
             with patch('atexit.register') as mock_atexit:
                 server._setup_cleanup_hooks()
                 cleanup_func = mock_atexit.call_args[0][0]
-                
+
             # Call the cleanup function
             cleanup_func()
-            
+
             # Verify cleanup was attempted
             mock_new_loop.assert_called_once()
             mock_set_loop.assert_called_once_with(mock_loop)
@@ -312,16 +311,15 @@ class TestProcessGroupManagement:
 
             executor = PyodideExecutor(config)
 
-            # Mock the path finding and script creation  
-            with patch.object(executor, '_find_pyodide_path', return_value='/fake/path'):
-                with patch('tempfile.NamedTemporaryFile'):
-                    # Use regular MagicMock for async methods to avoid warnings
-                    with patch.object(executor, '_wait_for_process_ready', return_value=None):
-                        with patch.object(executor, '_communicate_with_pyodide', return_value={"success": True}):
-                            try:
-                                await executor._initialize_pyodide()
-                            except Exception:
-                                pass  # We expect this to fail in test environment
+            # Mock the path finding and script creation
+            with (
+                patch.object(executor, '_find_pyodide_path', return_value='/fake/path'),
+                patch('tempfile.NamedTemporaryFile'),
+                patch.object(executor, '_wait_for_process_ready', return_value=None),
+                patch.object(executor, '_communicate_with_pyodide', return_value={"success": True}),
+                contextlib.suppress(Exception),
+            ):
+                await executor._initialize_pyodide()
 
             # Verify subprocess was created with start_new_session=True
             if mock_create.called:
@@ -345,8 +343,10 @@ class TestIntegrationScenarios:
             mock_executor.set_progress_callback = MagicMock()  # Add missing method
             mock_executor_class.return_value = mock_executor
 
-            with patch.object(ExecutorRegistry, 'register', return_value=None) as mock_register:
-                with patch.object(ExecutorRegistry, 'unregister', return_value=None) as mock_unregister:
+            with (
+                patch.object(ExecutorRegistry, 'register', return_value=None) as mock_register,
+                patch.object(ExecutorRegistry, 'unregister', return_value=None) as mock_unregister,
+            ):
 
                     # Execute code that will fail
                     responses = []

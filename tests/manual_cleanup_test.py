@@ -232,7 +232,7 @@ async def main():
         def __init__(self):
             self.passed = True
             self.error = None
-    
+
     try:
         await test_comprehensive_cleanup()
         return True

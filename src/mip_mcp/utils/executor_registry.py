@@ -58,7 +58,7 @@ class ExecutorRegistry:
     @classmethod
     async def cleanup_all(cls, silent: bool = False) -> None:
         """Clean up all registered executors.
-        
+
         Args:
             silent: If True, suppress all logging (useful during shutdown)
         """
@@ -96,7 +96,7 @@ class ExecutorRegistry:
                 )
                 if not silent:
                     logger.info("All executors cleaned up successfully")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if not silent:
                     logger.warning("Executor cleanup timed out after 15 seconds")
             except Exception as e:
