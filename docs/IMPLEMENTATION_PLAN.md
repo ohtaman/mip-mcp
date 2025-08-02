@@ -32,7 +32,7 @@ Transform optimization from a specialist tool to an accessible business solution
    - Mathematical constraint extraction
    - Variable and objective function definition
 
-2. **validate_and_debug_model** 
+2. **validate_and_debug_model**
    - Mathematical formulation validation
    - Infeasibility detection and analysis
    - Error interpretation and suggestions

@@ -224,17 +224,18 @@ uv run pytest tests/unit/test_handlers.py -v
 ### Code Quality
 
 ```bash
-# Format code
-uv run black src/ tests/
+# Format code and fix issues
+make format
 
-# Sort imports
-uv run isort src/ tests/
+# Run linting checks
+make lint
 
-# Type checking
-uv run mypy src/
+# Check code formatting without changes
+make lint-check
 
-# Run linting (if configured)
-uv run ruff check src/ tests/
+# Or use Ruff directly
+uv run ruff format src/ tests/
+uv run ruff check --fix src/ tests/
 ```
 
 ### Development Setup
@@ -243,8 +244,39 @@ uv run ruff check src/ tests/
 # Install development dependencies
 uv sync --group dev
 
-# Install pre-commit hooks (if using)
-pre-commit install
+# Install pre-commit hooks (recommended)
+make pre-commit-install
+
+# OR use pre-commit directly
+uv run pre-commit install
+```
+
+### Pre-commit Hooks
+
+This project uses pre-commit hooks to automatically check code quality before commits:
+
+```bash
+# Install pre-commit hooks
+make pre-commit-install
+
+# Run pre-commit on all files
+make pre-commit-run
+
+# Update hook versions
+make pre-commit-update
+```
+
+The pre-commit hooks will automatically:
+- Format code with Ruff
+- Fix linting issues
+- Check for trailing whitespace
+- Validate YAML and TOML files
+- Check for merge conflicts
+- Remove debug statements
+
+If pre-commit hooks fail, fix the issues and commit again. To skip hooks in emergencies:
+```bash
+git commit --no-verify -m "Emergency commit"
 ```
 
 ## Architecture

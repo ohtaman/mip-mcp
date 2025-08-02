@@ -82,15 +82,15 @@ class MIPMCPServer:
         self.solver_factory = SolverFactory(self.config)
         self.app = FastMCP("mip-mcp")
         self._register_handlers()
-    
+
     def _register_handlers(self):
         # MCPツール登録
         self.app.add_tool("solve_optimization", solve_handler)
         self.app.add_tool("execute_python_code", execute_code_handler)
         self.app.add_tool("get_library_examples", get_library_examples_handler)
-        self.app.add_tool("validate_model", validate_handler) 
+        self.app.add_tool("validate_model", validate_handler)
         self.app.add_tool("get_solver_status", status_handler)
-    
+
     async def run(self):
         await self.app.run()
 ```
@@ -109,22 +109,22 @@ class BaseSolver(ABC):
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.model = None
-        
+
     @abstractmethod
     async def solve(self, problem: OptimizationProblem) -> OptimizationSolution:
         """最適化問題を解決する"""
         pass
-    
+
     @abstractmethod
     def validate_problem(self, problem: OptimizationProblem) -> Dict[str, Any]:
         """問題の妥当性を検証する"""
         pass
-    
+
     @abstractmethod
     def get_solver_info(self) -> Dict[str, Any]:
         """ソルバー情報を取得する"""
         pass
-    
+
     @abstractmethod
     def set_parameters(self, params: Dict[str, Any]) -> None:
         """ソルバーパラメータを設定する"""
@@ -143,7 +143,7 @@ class SCIPSolver(BaseSolver):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self.model = pyscipopt.Model()
-        
+
     async def solve(self, problem: OptimizationProblem) -> OptimizationSolution:
         try:
             # 変数定義
@@ -155,21 +155,21 @@ class SCIPSolver(BaseSolver):
                     lb=var_def.lower_bound,
                     ub=var_def.upper_bound
                 )
-            
+
             # 制約条件追加
             for constraint in problem.constraints:
                 expr = self._build_expression(constraint.expression, variables)
                 self.model.addCons(expr <= constraint.rhs, name=constraint.name)
-            
+
             # 目的関数設定
             obj_expr = self._build_expression(problem.objective.expression, variables)
             self.model.setObjective(obj_expr, sense=problem.objective.sense)
-            
+
             # 最適化実行
             self.model.optimize()
-            
+
             return self._extract_solution(variables)
-            
+
         except Exception as e:
             return OptimizationSolution(
                 status="error",
@@ -197,35 +197,35 @@ class PythonCodeExecutor:
         self.config = config
         self.security_checker = SecurityChecker()
         self.allowed_imports = get_allowed_imports()
-        
+
     async def execute_optimization_code(self, code: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Pythonコードを実行して最適化問題を解決する
-        
+
         Args:
             code: 実行するPythonコード（PuLP/pyomo/pyscipopt等を使用）
             data: コードで使用するデータ
-        
+
         Returns:
             最適化結果
         """
         try:
             # セキュリティチェック
             self.security_checker.validate_code(code)
-            
+
             # 実行環境の準備
             namespace = self._prepare_namespace(data)
-            
+
             # コード実行
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 exec(code, namespace)
-            
+
             # 結果の抽出
             result = self._extract_result(namespace, output.getvalue())
-            
+
             return result
-            
+
         except Exception as e:
             return {
                 "status": "error",
@@ -233,20 +233,20 @@ class PythonCodeExecutor:
                 "objective_value": None,
                 "variables": {}
             }
-    
+
     def _prepare_namespace(self, data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """実行環境の名前空間を準備"""
         namespace = {
             '__builtins__': self._get_safe_builtins(),
             'data': data or {},
         }
-        
+
         # 許可されたライブラリをインポート
         for lib_name, lib_module in self.allowed_imports.items():
             namespace[lib_name] = lib_module
-            
+
         return namespace
-    
+
     def _get_safe_builtins(self) -> Dict[str, Any]:
         """安全なbuiltins関数のみを提供"""
         safe_builtins = {
@@ -254,23 +254,23 @@ class PythonCodeExecutor:
             'abs', 'round', 'int', 'float', 'str', 'list', 'dict',
             'tuple', 'set', 'bool', 'print'
         }
-        
+
         return {name: getattr(__builtins__, name) for name in safe_builtins if hasattr(__builtins__, name)}
-    
+
     def _extract_result(self, namespace: Dict[str, Any], output: str) -> Dict[str, Any]:
         """実行結果から最適化結果を抽出"""
         # PuLPの場合
         if 'pulp' in output.lower() or any('pulp' in str(v) for v in namespace.values()):
             return self._extract_pulp_result(namespace)
-        
-        # pyomoの場合  
+
+        # pyomoの場合
         if 'pyomo' in output.lower() or any('pyomo' in str(type(v)) for v in namespace.values()):
             return self._extract_pyomo_result(namespace)
-            
+
         # pyscipoptの場合
         if 'scip' in output.lower() or any('scip' in str(type(v)) for v in namespace.values()):
             return self._extract_scip_result(namespace)
-        
+
         # 汎用的な結果抽出
         return self._extract_generic_result(namespace, output)
 ```
@@ -283,53 +283,53 @@ from typing import Set, List
 
 class SecurityChecker:
     """コードのセキュリティチェックを行う"""
-    
+
     DANGEROUS_FUNCTIONS = {
         'eval', 'exec', 'compile', '__import__', 'open', 'file',
         'input', 'raw_input', 'reload', 'vars', 'globals', 'locals',
         'dir', 'getattr', 'setattr', 'delattr', 'hasattr'
     }
-    
+
     DANGEROUS_MODULES = {
         'os', 'sys', 'subprocess', 'shutil', 'glob', 'socket',
         'urllib', 'http', 'ftplib', 'smtplib', 'multiprocessing',
         'threading', 'pickle', 'marshal', 'shelve'
     }
-    
+
     def validate_code(self, code: str) -> bool:
         """コードの安全性を検証"""
         try:
             tree = ast.parse(code)
             checker = DangerousNodeVisitor()
             checker.visit(tree)
-            
+
             if checker.dangerous_nodes:
                 raise SecurityError(f"Dangerous operations detected: {checker.dangerous_nodes}")
-                
+
             return True
-            
+
         except SyntaxError as e:
             raise SecurityError(f"Syntax error in code: {str(e)}")
 
 class DangerousNodeVisitor(ast.NodeVisitor):
     """危険なASTノードを検出する"""
-    
+
     def __init__(self):
         self.dangerous_nodes = []
-    
+
     def visit_Call(self, node):
         # 危険な関数呼び出しをチェック
         if isinstance(node.func, ast.Name) and node.func.id in SecurityChecker.DANGEROUS_FUNCTIONS:
             self.dangerous_nodes.append(f"Function call: {node.func.id}")
         self.generic_visit(node)
-    
+
     def visit_Import(self, node):
         # 危険なモジュールのインポートをチェック
         for alias in node.names:
             if alias.name in SecurityChecker.DANGEROUS_MODULES:
                 self.dangerous_nodes.append(f"Import: {alias.name}")
         self.generic_visit(node)
-    
+
     def visit_ImportFrom(self, node):
         # from文での危険なインポートをチェック
         if node.module in SecurityChecker.DANGEROUS_MODULES:
@@ -350,16 +350,16 @@ import importlib
 def get_allowed_imports() -> Dict[str, Any]:
     """許可されたライブラリのマッピングを返す"""
     allowed_libs = {}
-    
+
     # 最適化ライブラリ
     optimization_libs = [
         'pulp',
-        'pyomo', 
+        'pyomo',
         'pyscipopt',
         'cvxpy',
         'ortools'
     ]
-    
+
     # 数値計算ライブラリ
     numeric_libs = [
         'numpy',
@@ -368,7 +368,7 @@ def get_allowed_imports() -> Dict[str, Any]:
         'math',
         'statistics'
     ]
-    
+
     # 全てのライブラリを試行してインポート
     for lib_name in optimization_libs + numeric_libs:
         try:
@@ -377,7 +377,7 @@ def get_allowed_imports() -> Dict[str, Any]:
         except ImportError:
             # ライブラリが利用できない場合はスキップ
             continue
-    
+
     return allowed_libs
 
 def get_library_info() -> Dict[str, Dict[str, Any]]:
@@ -391,7 +391,7 @@ import pulp
 # 問題定義
 prob = pulp.LpProblem("Example", pulp.LpMaximize)
 
-# 変数定義  
+# 変数定義
 x = pulp.LpVariable("x", 0, None)
 y = pulp.LpVariable("y", 0, None)
 
@@ -469,22 +469,22 @@ async def execute_code_handler(
 ) -> Dict[str, Any]:
     """
     Pythonコードを実行して最適化問題を解決する
-    
+
     Args:
         code: 実行するPythonコード
         data: コードで使用するデータ
         library: 使用する最適化ライブラリのヒント
-    
+
     Returns:
         最適化結果
     """
     try:
         executor = PythonCodeExecutor(context.config)
         result = await executor.execute_optimization_code(code, data)
-        
+
         logger.info(f"Code execution completed with library {library}")
         return result
-        
+
     except Exception as e:
         logger.error(f"Code execution failed: {str(e)}")
         return {
@@ -499,7 +499,7 @@ async def get_library_examples_handler(context: Context) -> Dict[str, Any]:
     利用可能なライブラリとサンプルコードを返す
     """
     from ..executor.libraries import get_library_info
-    
+
     return {
         "libraries": get_library_info(),
         "supported_formats": ["pulp", "pyomo", "pyscipopt", "cvxpy", "ortools"]
@@ -529,13 +529,13 @@ class Variable(BaseModel):
     type: VariableType = VariableType.CONTINUOUS
     lower_bound: Optional[float] = None
     upper_bound: Optional[float] = None
-    
+
 class Constraint(BaseModel):
     name: str
     expression: Dict[str, float]  # {variable_name: coefficient}
     sense: Literal["<=", ">=", "="] = "<="
     rhs: float
-    
+
 class Objective(BaseModel):
     sense: ObjectiveSense
     expression: Dict[str, float]  # {variable_name: coefficient}
@@ -596,12 +596,12 @@ async def solve_handler(
 ) -> Dict[str, Any]:
     """
     最適化問題を解決する
-    
+
     Args:
         problem_data: 最適化問題データ（JSON/LP/MPS形式）
         solver_name: 使用するソルバー名
         solver_params: ソルバーパラメータ
-    
+
     Returns:
         最適化結果
     """
@@ -609,21 +609,21 @@ async def solve_handler(
         # 問題データのパース
         parser = get_parser(problem_data)
         problem = parser.parse(problem_data)
-        
+
         # ソルバー取得
         solver = context.solver_factory.get_solver(solver_name)
-        
+
         # パラメータ設定
         if solver_params:
             solver.set_parameters(solver_params)
-        
+
         # 最適化実行
         solution = await solver.solve(problem)
-        
+
         logger.info(f"Optimization completed: {solution.status}")
-        
+
         return solution.dict()
-        
+
     except Exception as e:
         logger.error(f"Optimization failed: {str(e)}")
         return {
@@ -643,23 +643,23 @@ async def solve_handler(
 server:
   name: "mip-mcp"
   version: "0.1.0"
-  
+
 logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  
+
 solvers:
   default: "scip"
   timeout: 3600  # seconds
-  
+
 executor:
   enabled: true
   timeout: 300  # seconds for code execution
   memory_limit: "1GB"
-  
+
 parsers:
   supported_formats: ["json", "lp", "mps", "python"]
-  
+
 validation:
   max_variables: 100000
   max_constraints: 100000
@@ -674,14 +674,14 @@ scip:
   parameters:
     limits/time: 3600
     display/verblevel: 1
-    
+
 gurobi:
   class: "GurobiSolver"
   enabled: false
   parameters:
     TimeLimit: 3600
     OutputFlag: 1
-    
+
 cplex:
   class: "CPLEXSolver"
   enabled: false
@@ -701,15 +701,15 @@ class ConfigManager:
     def __init__(self, config_path: Optional[str] = None):
         self.config_dir = Path(config_path) if config_path else Path(__file__).parent.parent / "config"
         self.config = self._load_config()
-    
+
     def _load_config(self) -> Dict[str, Any]:
         """設定ファイルを読み込む"""
         default_config = self._load_yaml("default.yaml")
         solver_config = self._load_yaml("solvers.yaml")
-        
+
         default_config["solvers_config"] = solver_config
         return default_config
-    
+
     def _load_yaml(self, filename: str) -> Dict[str, Any]:
         """YAMLファイルを読み込む"""
         config_path = self.config_dir / filename
@@ -717,7 +717,7 @@ class ConfigManager:
             with open(config_path, 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f) or {}
         return {}
-    
+
     def get(self, key: str, default: Any = None) -> Any:
         """設定値を取得する"""
         keys = key.split('.')
@@ -790,7 +790,7 @@ class JSONParser:
     def parse(self, data: Union[Dict[str, Any], str]) -> OptimizationProblem:
         """
         JSON形式の最適化問題をパースする
-        
+
         Expected format:
         {
             "name": "problem_name",
@@ -808,7 +808,7 @@ class JSONParser:
         """
         if isinstance(data, str):
             data = json.loads(data)
-        
+
         return OptimizationProblem.parse_obj(data)
 ```
 
@@ -973,7 +973,7 @@ prob.solve()
 # 結果をグローバル変数として設定
 result = {
     "status": pulp.LpStatus[prob.status],
-    "objective": pulp.value(prob.objective), 
+    "objective": pulp.value(prob.objective),
     "variables": {v.name: v.varValue for v in prob.variables()}
 }
 """,

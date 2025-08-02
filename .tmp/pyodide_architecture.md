@@ -12,13 +12,13 @@
 interface PyodideExecutor {
   // Pyodide環境の初期化（遅延読み込み）
   initialize(): Promise<void>
-  
+
   // MIPコード実行（PuLP対応）
   executeMIPCode(code: string, options: ExecutionOptions): Promise<ExecutionResult>
-  
+
   // ライブラリ検出
   detectLibrary(code: string): MIPLibrary
-  
+
   // パフォーマンス最適化
   warmup(): Promise<void>
   dispose(): void
@@ -50,12 +50,12 @@ class ProblemExtractor:
             return ProblemInfo(format='mps', content=pyodide_globals['__mps_content__'])
         elif '__lp_content__' in pyodide_globals:
             return ProblemInfo(format='lp', content=pyodide_globals['__lp_content__'])
-        
+
         # 2. 自動検出方式
         problems = self._detect_problems(pyodide_globals)
         if problems:
             return self._generate_format(problems[0])
-        
+
         return ProblemInfo(format=None, content=None)
 ```
 
@@ -68,11 +68,11 @@ class MIPMCPTools:
     # ツール名: execute_mip_code (汎用的)
     # 実装: PuLPサポート、将来的に他ライブラリ対応可能
     async def execute_mip_code(self, code: str) -> ExecutionResult
-    
-    # ツール名: validate_mip_code (汎用的)  
+
+    # ツール名: validate_mip_code (汎用的)
     # 実装: 現在はPuLP構文検証
     async def validate_mip_code(self, code: str) -> ValidationResult
-    
+
     # その他既存ツールも同様に汎用的な名前を維持
 ```
 
@@ -84,7 +84,7 @@ class MIPMCPTools:
    ```typescript
    class PyodideExecutor {
      private pyodide: PyodideInterface | null = null
-     
+
      async initialize() {
        if (!this.pyodide) {
          this.pyodide = await loadPyodide()
@@ -92,7 +92,7 @@ class MIPMCPTools:
          await this.installMIPLibraries()
        }
      }
-     
+
      private async installMIPLibraries() {
        await this.pyodide.runPythonAsync(`
          import micropip
@@ -112,7 +112,7 @@ class MIPMCPTools:
            'pulp': pulp,
            # その他必要最小限のみ
        }
-       
+
        try:
            exec(user_code, safe_globals)
            return {
@@ -122,7 +122,7 @@ class MIPMCPTools:
            }
        except Exception as e:
            return {
-               'success': False, 
+               'success': False,
                'globals': {},
                'error': str(e)
            }
@@ -136,7 +136,7 @@ class MIPMCPTools:
    import pulp
    prob = pulp.LpProblem("example", pulp.LpMaximize)
    # ... 問題定義 ...
-   
+
    # LP形式を変数に設定（推奨方式）
    prob.writeLP("/tmp/problem.lp")
    with open("/tmp/problem.lp", "r") as f:
@@ -159,7 +159,7 @@ class MIPMCPTools:
    ```typescript
    class PyodidePool {
      private instances: PyodideExecutor[] = []
-     
+
      async warmup(count: number = 3) {
        for (let i = 0; i < count; i++) {
          const executor = new PyodideExecutor()
@@ -167,7 +167,7 @@ class MIPMCPTools:
          this.instances.push(executor)
        }
      }
-     
+
      async getExecutor(): Promise<PyodideExecutor> {
        return this.instances.pop() || new PyodideExecutor()
      }
@@ -182,7 +182,7 @@ class MIPMCPTools:
 ## 移行計画
 
 ### Step 1: 新しいPyodide実行エンジン実装
-- `src/mip_mcp/executor/pyodide_executor.py` 
+- `src/mip_mcp/executor/pyodide_executor.py`
 - Node.js統合とPyodide初期化
 
 ### Step 2: 既存ハンドラーの更新

@@ -1,6 +1,6 @@
 # Makefile for MIP-MCP project
 
-.PHONY: help install test test-unit test-integration test-basic coverage lint format clean dev-install
+.PHONY: help install test test-unit test-integration test-basic coverage lint format clean dev-install pre-commit-install pre-commit-run pre-commit-update
 
 # Default target
 help:
@@ -14,6 +14,9 @@ help:
 	@echo "  coverage      Run tests with coverage report"
 	@echo "  lint          Run linting with ruff"
 	@echo "  format        Format code with ruff"
+	@echo "  pre-commit-install  Install pre-commit hooks"
+	@echo "  pre-commit-run      Run pre-commit on all files"
+	@echo "  pre-commit-update   Update pre-commit hook versions"
 	@echo "  clean         Clean cache and build artifacts"
 
 # Installation
@@ -57,6 +60,16 @@ format:
 lint-check:
 	uv run ruff check src/ tests/
 	uv run ruff format --check src/ tests/
+
+# Pre-commit hooks
+pre-commit-install:
+	uv run pre-commit install
+
+pre-commit-run:
+	uv run pre-commit run --all-files
+
+pre-commit-update:
+	uv run pre-commit autoupdate
 
 # Cleanup
 clean:

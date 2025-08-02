@@ -10,11 +10,11 @@ Issue #2 identified potential ghost process (orphaned subprocess) problems in th
 
 **Solution Implemented**:
 - **Graceful shutdown cascade**: Try exit command → SIGTERM → SIGKILL with proper timeouts
-- **Proper timeout handling**: 2s for graceful exit, 5s for SIGTERM, 2s for SIGKILL  
+- **Proper timeout handling**: 2s for graceful exit, 5s for SIGTERM, 2s for SIGKILL
 - **Idempotent cleanup**: Multiple cleanup calls are safe
 - **Improved `__del__` method**: Synchronous fallback cleanup for destruction scenarios
 
-### ✅ 2. Process Group Management  
+### ✅ 2. Process Group Management
 **Location**: `src/mip_mcp/executor/pyodide_executor.py:184`
 
 **Solution Implemented**:
@@ -69,7 +69,7 @@ Issue #2 identified potential ghost process (orphaned subprocess) problems in th
 ## Implementation Statistics
 
 - **Files Modified**: 4 core files
-- **New Files Added**: 1 (executor_registry.py) 
+- **New Files Added**: 1 (executor_registry.py)
 - **Test Files Added**: 1 (test_subprocess_cleanup.py)
 - **Test Cases**: 14 tests covering all scenarios
 - **Test Pass Rate**: 100% (88 passed, 7 skipped)
@@ -77,7 +77,7 @@ Issue #2 identified potential ghost process (orphaned subprocess) problems in th
 ## Acceptance Criteria Status
 
 - ✅ No ghost processes remain after server shutdown
-- ✅ Signal handlers properly clean up all subprocesses  
+- ✅ Signal handlers properly clean up all subprocesses
 - ✅ Process cleanup works under all exception conditions
 - ✅ Subprocess cleanup completes within reasonable timeouts
 - ✅ Process groups prevent orphaned child processes

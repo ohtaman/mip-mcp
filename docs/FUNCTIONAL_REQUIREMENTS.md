@@ -7,7 +7,7 @@
 - **Input**: Natural language business problem description, context, constraints
 - **Processing**: Semantic parsing, constraint extraction, template matching
 - **Output**: Mathematical MIP model (variables, constraints, objective function)
-- **Acceptance Criteria**: 
+- **Acceptance Criteria**:
   - Support for common business domains (supply chain, scheduling, resource allocation)
   - 90% accuracy for well-defined problems
   - Generate valid mathematical formulations
