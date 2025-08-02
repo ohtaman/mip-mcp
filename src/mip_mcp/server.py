@@ -1,5 +1,8 @@
 """MIP MCP Server implementation."""
 
+import asyncio
+import atexit
+import contextlib
 from typing import Any
 
 from fastmcp import Context, FastMCP
@@ -17,6 +20,7 @@ from .models.responses import (
     ValidationResponse,
 )
 from .utils.config_manager import ConfigManager
+from .utils.executor_registry import ExecutorRegistry
 from .utils.logger import get_logger, setup_logging
 
 logger = get_logger(__name__)
@@ -41,12 +45,34 @@ class MIPMCPServer:
         # Initialize FastMCP app
         self.app = FastMCP("mip-mcp")
 
+        # Setup cleanup hooks
+        self._setup_cleanup_hooks()
+
         # Register MCP tools
         self._register_tools()
 
         logger.info(
             f"MIP MCP Server initialized (version: {self.config.server.version})"
         )
+
+
+    def _setup_cleanup_hooks(self):
+        """Setup cleanup hooks that work with FastMCP's natural shutdown."""
+        # Register atexit handler as the main cleanup mechanism
+        def atexit_cleanup():
+            """Clean up executors when the process exits."""
+            with contextlib.suppress(Exception):
+                # Only run cleanup if there are active executors
+                if hasattr(ExecutorRegistry, '_executors') and ExecutorRegistry._executors:
+                    logger.info("Cleaning up active executors during shutdown...")
+                    try:
+                        asyncio.run(ExecutorRegistry.cleanup_all(silent=True))
+                        logger.info("Cleanup completed successfully")
+                    except RuntimeError:
+                        # Event loop might still be running, skip cleanup
+                        logger.debug("Skipping cleanup - event loop still running")
+
+        atexit.register(atexit_cleanup)
 
     def _register_tools(self):
         """Register MCP tools with the FastMCP app."""
@@ -138,13 +164,6 @@ class MIPMCPServer:
 
     def run(self, show_banner: bool = True):
         """Run the MCP server."""
-        try:
-            logger.info("Starting MIP MCP Server...")
-            self.app.run(show_banner=show_banner)
-        except KeyboardInterrupt:
-            logger.info("Server stopped by user")
-        except Exception as e:
-            logger.error(f"Server error: {e}")
-            raise
-        finally:
-            logger.info("MIP MCP Server shutdown complete")
+        logger.info("Starting MIP MCP Server...")
+        # Let FastMCP handle signals and shutdown naturally
+        self.app.run(show_banner=show_banner)

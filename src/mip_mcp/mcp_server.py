@@ -2,24 +2,21 @@
 """Pure MCP server entry point without CLI output."""
 
 import os
-import sys
 
 from .server import MIPMCPServer
 
 
 def mcp_main():
     """MCP-only entry point."""
-    try:
-        # Set MCP mode environment variable
-        os.environ["MCP_MODE"] = "1"
+    # Set MCP mode environment variable
+    os.environ["MCP_MODE"] = "1"
 
-        server = MIPMCPServer()
-        # FastMCP's run method is synchronous and handles asyncio internally
-        server.app.run(show_banner=False)
-    except KeyboardInterrupt:
-        sys.exit(0)
-    except Exception:
-        sys.exit(1)
+    # Create server - signal handlers are set up in __init__
+    server = MIPMCPServer()
+    
+    # FastMCP's run method is synchronous and handles asyncio internally
+    # Our signal handlers will handle Ctrl+C properly
+    server.app.run(show_banner=False)
 
 
 if __name__ == "__main__":

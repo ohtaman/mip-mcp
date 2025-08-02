@@ -30,6 +30,7 @@ class PyodideExecutor:
         self.pyodide_process = None
         self.detector = MIPLibraryDetector()
         self._pyodide_initialized = False
+        self._cleanup_started = False
         self.progress_callback: Callable[[SolverProgress], None] | None = None
         self._progress_queue: asyncio.Queue | None = None
         self.start_time: float = 0.0
@@ -180,6 +181,7 @@ class PyodideExecutor:
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,  # Create new process group
                 )
 
                 # Wait for process to signal readiness
@@ -723,28 +725,66 @@ globals()['__stdout__'] = __stdout__
             }
 
     async def cleanup(self):
-        """Clean up Pyodide process."""
+        """Clean up Pyodide process with proper timeout handling."""
+        if self._cleanup_started:
+            logger.debug("Cleanup already in progress")
+            return
+
+        self._cleanup_started = True
+
         if self.pyodide_process:
-            try:
-                # Send exit command
-                await self._communicate_with_pyodide({"action": "exit"})
-                await asyncio.sleep(0.1)  # Give it time to exit gracefully
-            except Exception:
-                pass  # Process might already be dead
+            logger.debug(f"Starting cleanup of Pyodide process (PID: {self.pyodide_process.pid})")
 
             try:
-                self.pyodide_process.terminate()
-                await self.pyodide_process.wait()
-            except Exception:
-                pass
+                # First, try graceful shutdown with exit command
+                try:
+                    await asyncio.wait_for(
+                        self._communicate_with_pyodide({"action": "exit"}),
+                        timeout=2.0
+                    )
+                    logger.debug("Sent exit command to Pyodide process")
+                except (TimeoutError, Exception) as e:
+                    logger.debug(f"Failed to send exit command: {e}")
 
-            self.pyodide_process = None
-            self._pyodide_initialized = False
-            logger.info("Pyodide process cleaned up")
+                # Give process a moment to exit gracefully
+                try:
+                    await asyncio.wait_for(self.pyodide_process.wait(), timeout=1.0)
+                    logger.debug("Process exited gracefully")
+                except TimeoutError:
+                    # Process didn't exit gracefully, try SIGTERM
+                    logger.debug("Process didn't exit gracefully, sending SIGTERM")
+                    try:
+                        self.pyodide_process.terminate()
+                        await asyncio.wait_for(self.pyodide_process.wait(), timeout=5.0)
+                        logger.debug("Process terminated with SIGTERM")
+                    except TimeoutError:
+                        # Last resort: SIGKILL
+                        logger.warning("Process didn't respond to SIGTERM, sending SIGKILL")
+                        try:
+                            self.pyodide_process.kill()
+                            await asyncio.wait_for(self.pyodide_process.wait(), timeout=2.0)
+                            logger.debug("Process killed with SIGKILL")
+                        except TimeoutError:
+                            logger.error("Process failed to terminate even after SIGKILL")
+
+            except Exception as e:
+                logger.warning(f"Error during cleanup: {e}")
+            finally:
+                self.pyodide_process = None
+                self._pyodide_initialized = False
+                logger.info("Pyodide process cleanup completed")
 
     def __del__(self):
         """Cleanup on destruction."""
-        if self.pyodide_process:
-            # Note: Can't use await in __del__, so we'll just terminate
+        if self.pyodide_process and not self._cleanup_started:
+            # Note: Can't use await in __del__, so we'll just terminate synchronously
+            logger.warning("PyodideExecutor finalized without cleanup - terminating process")
             with contextlib.suppress(builtins.BaseException):
                 self.pyodide_process.terminate()
+                # Try to kill if terminate doesn't work quickly
+                try:
+                    # Non-blocking check if process is still alive
+                    if self.pyodide_process.poll() is None:
+                        self.pyodide_process.kill()
+                except (OSError, AttributeError):
+                    pass  # Process might already be gone
