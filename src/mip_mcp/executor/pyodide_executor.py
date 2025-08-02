@@ -733,14 +733,15 @@ globals()['__stdout__'] = __stdout__
         self._cleanup_started = True
 
         if self.pyodide_process:
-            logger.debug(f"Starting cleanup of Pyodide process (PID: {self.pyodide_process.pid})")
+            logger.debug(
+                f"Starting cleanup of Pyodide process (PID: {self.pyodide_process.pid})"
+            )
 
             try:
                 # First, try graceful shutdown with exit command
                 try:
                     await asyncio.wait_for(
-                        self._communicate_with_pyodide({"action": "exit"}),
-                        timeout=2.0
+                        self._communicate_with_pyodide({"action": "exit"}), timeout=2.0
                     )
                     logger.debug("Sent exit command to Pyodide process")
                 except (TimeoutError, Exception) as e:
@@ -759,13 +760,19 @@ globals()['__stdout__'] = __stdout__
                         logger.debug("Process terminated with SIGTERM")
                     except TimeoutError:
                         # Last resort: SIGKILL
-                        logger.warning("Process didn't respond to SIGTERM, sending SIGKILL")
+                        logger.warning(
+                            "Process didn't respond to SIGTERM, sending SIGKILL"
+                        )
                         try:
                             self.pyodide_process.kill()
-                            await asyncio.wait_for(self.pyodide_process.wait(), timeout=2.0)
+                            await asyncio.wait_for(
+                                self.pyodide_process.wait(), timeout=2.0
+                            )
                             logger.debug("Process killed with SIGKILL")
                         except TimeoutError:
-                            logger.error("Process failed to terminate even after SIGKILL")
+                            logger.error(
+                                "Process failed to terminate even after SIGKILL"
+                            )
 
             except Exception as e:
                 logger.warning(f"Error during cleanup: {e}")
@@ -778,7 +785,9 @@ globals()['__stdout__'] = __stdout__
         """Cleanup on destruction."""
         if self.pyodide_process and not self._cleanup_started:
             # Note: Can't use await in __del__, so we'll just terminate synchronously
-            logger.warning("PyodideExecutor finalized without cleanup - terminating process")
+            logger.warning(
+                "PyodideExecutor finalized without cleanup - terminating process"
+            )
             with contextlib.suppress(builtins.BaseException):
                 self.pyodide_process.terminate()
                 # Try to kill if terminate doesn't work quickly

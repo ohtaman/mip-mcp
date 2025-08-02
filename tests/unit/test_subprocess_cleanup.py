@@ -93,6 +93,7 @@ class TestExecutorRegistry:
 
         # Force garbage collection and check count
         import gc
+
         gc.collect()
 
         # The count should eventually become 0 as dead references are cleaned up
@@ -143,6 +144,7 @@ class TestPyodideExecutorCleanup:
 
         # Make wait timeout initially, then succeed after terminate
         wait_call_count = 0
+
         async def mock_wait():
             nonlocal wait_call_count
             wait_call_count += 1
@@ -260,7 +262,7 @@ class TestServerSignalHandling:
 
     def test_atexit_handler_registration(self):
         """Test that atexit cleanup handler is properly registered."""
-        with patch('atexit.register') as mock_atexit:
+        with patch("atexit.register") as mock_atexit:
             MIPMCPServer()
 
             # Verify atexit handler was registered
@@ -272,17 +274,17 @@ class TestServerSignalHandling:
 
         # Mock ExecutorRegistry to simulate active executors
         with (
-            patch.object(ExecutorRegistry, 'get_active_count', return_value=2),
-            patch.object(ExecutorRegistry, 'cleanup_all', return_value=None),
-            patch('asyncio.new_event_loop') as mock_new_loop,
-            patch('asyncio.set_event_loop') as mock_set_loop,
+            patch.object(ExecutorRegistry, "get_active_count", return_value=2),
+            patch.object(ExecutorRegistry, "cleanup_all", return_value=None),
+            patch("asyncio.new_event_loop") as mock_new_loop,
+            patch("asyncio.set_event_loop") as mock_set_loop,
         ):
             # Create mock loop
             mock_loop = MagicMock()
             mock_new_loop.return_value = mock_loop
 
             # Get the atexit cleanup function and call it
-            with patch('atexit.register') as mock_atexit:
+            with patch("atexit.register") as mock_atexit:
                 server._setup_cleanup_hooks()
                 cleanup_func = mock_atexit.call_args[0][0]
 
@@ -304,7 +306,7 @@ class TestProcessGroupManagement:
         """Test that subprocesses are created with start_new_session=True."""
         config = {"executor": {"timeout": 60}}
 
-        with patch('asyncio.create_subprocess_exec') as mock_create:
+        with patch("asyncio.create_subprocess_exec") as mock_create:
             mock_process = MagicMock()
             mock_process.pid = 12345
             mock_create.return_value = mock_process
@@ -313,10 +315,14 @@ class TestProcessGroupManagement:
 
             # Mock the path finding and script creation
             with (
-                patch.object(executor, '_find_pyodide_path', return_value='/fake/path'),
-                patch('tempfile.NamedTemporaryFile'),
-                patch.object(executor, '_wait_for_process_ready', return_value=None),
-                patch.object(executor, '_communicate_with_pyodide', return_value={"success": True}),
+                patch.object(executor, "_find_pyodide_path", return_value="/fake/path"),
+                patch("tempfile.NamedTemporaryFile"),
+                patch.object(executor, "_wait_for_process_ready", return_value=None),
+                patch.object(
+                    executor,
+                    "_communicate_with_pyodide",
+                    return_value={"success": True},
+                ),
                 contextlib.suppress(Exception),
             ):
                 await executor._initialize_pyodide()
@@ -324,7 +330,7 @@ class TestProcessGroupManagement:
             # Verify subprocess was created with start_new_session=True
             if mock_create.called:
                 call_kwargs = mock_create.call_args[1]
-                assert call_kwargs.get('start_new_session') is True
+                assert call_kwargs.get("start_new_session") is True
 
 
 class TestIntegrationScenarios:
@@ -336,34 +342,40 @@ class TestIntegrationScenarios:
         from src.mip_mcp.handlers.execute_code import execute_mip_code_with_progress
 
         # Mock executor creation and registration
-        with patch('src.mip_mcp.handlers.execute_code.PyodideExecutor') as mock_executor_class:
+        with patch(
+            "src.mip_mcp.handlers.execute_code.PyodideExecutor"
+        ) as mock_executor_class:
             mock_executor = MagicMock()
             mock_executor.cleanup = AsyncMock()
-            mock_executor.execute_mip_code = AsyncMock(side_effect=Exception("Test error"))
+            mock_executor.execute_mip_code = AsyncMock(
+                side_effect=Exception("Test error")
+            )
             mock_executor.set_progress_callback = MagicMock()  # Add missing method
             mock_executor_class.return_value = mock_executor
 
             with (
-                patch.object(ExecutorRegistry, 'register', return_value=None) as mock_register,
-                patch.object(ExecutorRegistry, 'unregister', return_value=None) as mock_unregister,
+                patch.object(
+                    ExecutorRegistry, "register", return_value=None
+                ) as mock_register,
+                patch.object(
+                    ExecutorRegistry, "unregister", return_value=None
+                ) as mock_unregister,
             ):
+                # Execute code that will fail
+                responses = []
+                async for response in execute_mip_code_with_progress(
+                    code="invalid code", config={"executor": {"timeout": 60}}
+                ):
+                    responses.append(response)
 
-                    # Execute code that will fail
-                    responses = []
-                    async for response in execute_mip_code_with_progress(
-                        code="invalid code",
-                        config={"executor": {"timeout": 60}}
-                    ):
-                        responses.append(response)
+                # Verify executor was registered and cleaned up
+                mock_register.assert_called_once_with(mock_executor)
+                mock_executor.cleanup.assert_called_once()
+                mock_unregister.assert_called_once_with(mock_executor)
 
-                    # Verify executor was registered and cleaned up
-                    mock_register.assert_called_once_with(mock_executor)
-                    mock_executor.cleanup.assert_called_once()
-                    mock_unregister.assert_called_once_with(mock_executor)
-
-                    # Should get an error response
-                    assert len(responses) == 1
-                    assert responses[0].status == "error"
+                # Should get an error response
+                assert len(responses) == 1
+                assert responses[0].status == "error"
 
     @pytest.mark.asyncio
     async def test_multiple_concurrent_executors(self):

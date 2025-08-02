@@ -92,7 +92,7 @@ class ExecutorRegistry:
                 # Wait for all cleanups with timeout
                 await asyncio.wait_for(
                     asyncio.gather(*cleanup_tasks, return_exceptions=True),
-                    timeout=15.0  # 15 second total timeout for all cleanups
+                    timeout=15.0,  # 15 second total timeout for all cleanups
                 )
                 if not silent:
                     logger.info("All executors cleaned up successfully")

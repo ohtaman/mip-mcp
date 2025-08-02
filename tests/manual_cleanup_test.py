@@ -33,12 +33,14 @@ def get_nodejs_processes():
     """Get list of Node.js processes."""
     try:
         result = subprocess.run(
-            ["ps", "aux", "-o", "pid,ppid,command"],
-            capture_output=True,
-            text=True
+            ["ps", "aux", "-o", "pid,ppid,command"], capture_output=True, text=True
         )
-        lines = result.stdout.split('\n')
-        nodejs_procs = [line for line in lines if 'node' in line.lower() and 'pyodide' in line.lower()]
+        lines = result.stdout.split("\n")
+        nodejs_procs = [
+            line
+            for line in lines
+            if "node" in line.lower() and "pyodide" in line.lower()
+        ]
         return nodejs_procs
     except Exception as e:
         print(f"Error getting process list: {e}")
@@ -128,7 +130,7 @@ async def test_registry_cleanup():
         executor = PyodideExecutor(config)
         await ExecutorRegistry.register(executor)
         executors.append(executor)
-        print(f"   Created executor {i+1}")
+        print(f"   Created executor {i + 1}")
 
     print(f"\n2. Registry count: {ExecutorRegistry.get_active_count()}")
 
@@ -164,7 +166,9 @@ async def test_signal_handling():
     # This simulates what happens when a signal is received
     await ExecutorRegistry.cleanup_all()
 
-    print(f"4. Registry count after signal cleanup: {ExecutorRegistry.get_active_count()}")
+    print(
+        f"4. Registry count after signal cleanup: {ExecutorRegistry.get_active_count()}"
+    )
 
     if ExecutorRegistry.get_active_count() == 0:
         print("   ✅ PASS: Signal cleanup simulation successful!")
@@ -212,7 +216,7 @@ async def test_comprehensive_cleanup():
 
     for i, (name, result) in enumerate(zip(test_names, results, strict=False)):
         status = "✅ PASS" if result else "❌ FAIL"
-        print(f"{i+1}. {name}: {status}")
+        print(f"{i + 1}. {name}: {status}")
 
     print(f"\nOverall: {passed}/{total} tests passed")
 
@@ -227,6 +231,7 @@ async def test_comprehensive_cleanup():
 
 async def main():
     """Main function for standalone execution."""
+
     # Create a dummy test result that mimics pytest behavior
     class TestResult:
         def __init__(self):
