@@ -7,11 +7,11 @@ import contextlib
 from typing import Dict, Any, Optional
 from pathlib import Path
 
-from ..executor.universal_executor import UniversalMIPExecutor
-from ..executor.pyodide_executor import PyodideExecutor, SecurityError
-from ..executor.code_executor import CodeExecutionError
+from ..executor.pyodide_executor import PyodideExecutor
+from ..exceptions import CodeExecutionError, SecurityError
 from ..solvers.scip_solver import SCIPSolver
 from ..models.solution import OptimizationSolution, SolutionValidation
+from ..models.responses import ExecutionResponse, SolverInfoResponse, ValidationResponse, ExamplesResponse, SolverInfo, ValidationIssue, ExampleCode
 from ..utils.solution_validator import SolutionValidator
 from ..utils.library_detector import MIPLibrary
 from ..utils.logger import get_logger
@@ -48,7 +48,7 @@ async def execute_mip_code_handler(
     validate_solution: bool = True,
     validation_tolerance: float = 1e-6,
     config: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
+) -> ExecutionResponse:
     """Execute PuLP code and solve the optimization problem.
     
     Args:
@@ -85,13 +85,13 @@ async def execute_mip_code_handler(
         )
         
         if not file_path:
-            return {
-                "status": "error",
-                "message": "No optimization file was generated",
-                "stdout": stdout,
-                "stderr": stderr,
-                "solution": None
-            }
+            return ExecutionResponse(
+                status="error",
+                message="No optimization file was generated",
+                stdout=stdout,
+                stderr=stderr,
+                solution=None
+            )
         
         logger.info(f"Generated optimization file: {file_path}")
         
@@ -136,17 +136,17 @@ async def execute_mip_code_handler(
             logger.warning(f"Failed to clean up file {file_path}: {e}")
         
         # Prepare response
-        response = {
-            "status": "success",
-            "message": "Code executed and problem solved successfully",
-            "stdout": stdout,
-            "stderr": stderr,
-            "solution": solution.model_dump(),
-            "file_format": "auto",
-            "library_used": detected_library.value,
-            "executor_used": "pyodide",
-            "solver_info": solver.get_solver_info()
-        }
+        response = ExecutionResponse(
+            status="success",
+            message="Code executed and problem solved successfully",
+            stdout=stdout,
+            stderr=stderr,
+            solution=solution.model_dump(),
+            file_format="auto",
+            library_used=detected_library.value,
+            executor_used="pyodide",
+            solver_info=solver.get_solver_info()
+        )
         
         logger.info(f"Optimization completed: {solution.status}")
         return response
@@ -161,47 +161,47 @@ async def execute_mip_code_handler(
         
         if "security" in str(e).lower():
             logger.error(f"Security error: {e}")
-            return {
-                "status": "security_error",
-                "message": f"Code contains security violations: {e}",
-                "stdout": "",
-                "stderr": "",
-                "solution": None
-            }
+            return ExecutionResponse(
+                status="security_error",
+                message=f"Code contains security violations: {e}",
+                stdout="",
+                stderr="",
+                solution=None
+            )
         raise
     
     except SecurityError as e:
         logger.error(f"Security error: {e}")
-        return {
-            "status": "security_error",
-            "message": f"Code contains security violations: {e}",
-            "stdout": "",
-            "stderr": "",
-            "solution": None
-        }
+        return ExecutionResponse(
+            status="security_error",
+            message=f"Code contains security violations: {e}",
+            stdout="",
+            stderr="",
+            solution=None
+        )
     
     except CodeExecutionError as e:
         logger.error(f"Code execution error: {e}")
-        return {
-            "status": "execution_error",
-            "message": f"Code execution failed: {e}",
-            "stdout": "",
-            "stderr": "",
-            "solution": None
-        }
+        return ExecutionResponse(
+            status="execution_error",
+            message=f"Code execution failed: {e}",
+            stdout="",
+            stderr="",
+            solution=None
+        )
     
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
-        return {
-            "status": "error",
-            "message": f"An unexpected error occurred: {e}",
-            "stdout": "",
-            "stderr": "",
-            "solution": None
-        }
+        return ExecutionResponse(
+            status="error",
+            message=f"An unexpected error occurred: {e}",
+            stdout="",
+            stderr="",
+            solution=None
+        )
 
 
-async def get_solver_info_handler(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+async def get_solver_info_handler(config: Optional[Dict[str, Any]] = None) -> SolverInfoResponse:
     """Get information about available solvers.
     
     Args:
@@ -214,28 +214,28 @@ async def get_solver_info_handler(config: Optional[Dict[str, Any]] = None) -> Di
         solver = SCIPSolver(config.get("solvers", {}) if config else {})
         solver_info = solver.get_solver_info()
         
-        return {
-            "status": "success",
-            "solvers": {
-                "scip": solver_info
+        return SolverInfoResponse(
+            status="success",
+            solvers={
+                "scip": SolverInfo(**solver_info)
             },
-            "default_solver": "scip"
-        }
+            default_solver="scip"
+        )
     
     except Exception as e:
         logger.error(f"Failed to get solver info: {e}")
-        return {
-            "status": "error",
-            "message": f"Failed to get solver information: {e}",
-            "solvers": {},
-            "default_solver": None
-        }
+        return SolverInfoResponse(
+            status="error",
+            message=f"Failed to get solver information: {e}",
+            solvers={},
+            default_solver=None
+        )
 
 
 async def validate_mip_code_handler(
     code: str,
     config: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
+) -> ValidationResponse:
     """Validate PuLP code without executing it.
     
     Args:
@@ -250,18 +250,29 @@ async def validate_mip_code_handler(
         executor = PyodideExecutor(config or {})
         result = await executor.validate_code(code)
         
-        return result
+        # Convert dict result to ValidationResponse
+        issues = []
+        if 'issues' in result:
+            for issue in result['issues']:
+                issues.append(ValidationIssue(**issue))
+        
+        return ValidationResponse(
+            status=result.get('status', 'error'),
+            message=result.get('message', ''),
+            issues=issues,
+            is_valid=result.get('is_valid')
+        )
     
     except Exception as e:
         logger.error(f"Validation error: {e}")
-        return {
-            "status": "error",
-            "message": f"Validation failed: {e}",
-            "issues": []
-        }
+        return ValidationResponse(
+            status="error",
+            message=f"Validation failed: {e}",
+            issues=[]
+        )
 
 
-async def get_mip_examples_handler() -> Dict[str, Any]:
+async def get_mip_examples_handler() -> ExamplesResponse:
     """Get example MIP code snippets for both PuLP and Python-MIP.
     
     Returns:
@@ -436,8 +447,18 @@ model += mip.xsum(weights[item] * x[item] for item in items) <= capacity
         }
     }
     
-    return {
-        "status": "success",
-        "examples": examples,
-        "total_examples": len(examples)
-    }
+    # Convert dict examples to ExampleCode models
+    example_models = {}
+    for key, ex in examples.items():
+        example_models[key] = ExampleCode(
+            name=ex["name"],
+            description=ex["description"],
+            code=ex["code"],
+            library="pulp" if "pulp" in ex["code"] else "python-mip" if "mip" in ex["code"] else None
+        )
+    
+    return ExamplesResponse(
+        status="success",
+        examples=example_models,
+        total_examples=len(examples)
+    )

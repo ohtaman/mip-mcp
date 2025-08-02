@@ -5,6 +5,8 @@ import asyncio
 
 from fastmcp import FastMCP, Context
 
+from .models.responses import ExecutionResponse, SolverInfoResponse, ValidationResponse, ExamplesResponse
+
 from .handlers.execute_code import (
     execute_mip_code_handler,
     get_solver_info_handler,
@@ -52,7 +54,7 @@ class MIPMCPServer:
             solver_params: Optional[Dict[str, Any]] = None,
             validate_solution: bool = True,
             validation_tolerance: float = 1e-6
-        ) -> Dict[str, Any]:
+        ) -> ExecutionResponse:
             """Execute PuLP optimization code and solve the problem.
             
             Executes PuLP Python code to create and solve optimization problems:
@@ -80,7 +82,7 @@ class MIPMCPServer:
             )
         
         @self.app.tool()
-        async def get_solver_info(ctx: Context) -> Dict[str, Any]:
+        async def get_solver_info(ctx: Context) -> SolverInfoResponse:
             """Get information about the optimization solver.
             
             Returns:
@@ -94,7 +96,7 @@ class MIPMCPServer:
         async def validate_mip_code(
             ctx: Context,
             code: str
-        ) -> Dict[str, Any]:
+        ) -> ValidationResponse:
             """Validate PuLP code before execution.
             
             Checks code for syntax errors and potential issues before running.
@@ -111,7 +113,7 @@ class MIPMCPServer:
             )
         
         @self.app.tool()
-        async def get_mip_examples(ctx: Context) -> Dict[str, Any]:
+        async def get_mip_examples(ctx: Context) -> ExamplesResponse:
             """Get example optimization code snippets.
             
             Provides ready-to-use PuLP examples:

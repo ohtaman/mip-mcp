@@ -9,13 +9,9 @@ from pathlib import Path
 
 from ..utils.library_detector import MIPLibraryDetector, MIPLibrary
 from ..utils.logger import get_logger
+from ..exceptions import SecurityError
 
 logger = get_logger(__name__)
-
-
-class SecurityError(Exception):
-    """Security-related error during code validation."""
-    pass
 
 
 class PyodideExecutor:
