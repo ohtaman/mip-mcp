@@ -2,7 +2,6 @@
 
 import asyncio
 import atexit
-import contextlib
 from typing import Any
 
 from fastmcp import Context, FastMCP
@@ -55,22 +54,41 @@ class MIPMCPServer:
             f"MIP MCP Server initialized (version: {self.config.server.version})"
         )
 
-
     def _setup_cleanup_hooks(self):
         """Setup cleanup hooks that work with FastMCP's natural shutdown."""
+
         # Register atexit handler as the main cleanup mechanism
         def atexit_cleanup():
             """Clean up executors when the process exits."""
-            with contextlib.suppress(Exception):
-                # Only run cleanup if there are active executors
-                if hasattr(ExecutorRegistry, '_executors') and ExecutorRegistry._executors:
-                    logger.info("Cleaning up active executors during shutdown...")
+            try:
+                # Check if there are active executors
+                active_count = ExecutorRegistry.get_active_count()
+                if active_count > 0:
+                    print(f"Cleaning up {active_count} active executor(s)...")
+                    logger.info(
+                        f"Cleaning up {active_count} active executors during shutdown..."
+                    )
+
                     try:
-                        asyncio.run(ExecutorRegistry.cleanup_all(silent=True))
-                        logger.info("Cleanup completed successfully")
-                    except RuntimeError:
-                        # Event loop might still be running, skip cleanup
-                        logger.debug("Skipping cleanup - event loop still running")
+                        # Create new event loop for cleanup if needed
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            loop.run_until_complete(
+                                ExecutorRegistry.cleanup_all(silent=False)
+                            )
+                            print("Cleanup completed successfully")
+                            logger.info("Cleanup completed successfully")
+                        finally:
+                            loop.close()
+                    except Exception as e:
+                        print(f"Warning: Cleanup error: {e}")
+                        logger.warning(f"Cleanup error: {e}")
+                else:
+                    logger.debug("No active executors to clean up")
+            except Exception as e:
+                # Suppress all exceptions during atexit to avoid ugly tracebacks
+                logger.debug(f"Atexit cleanup error (suppressed): {e}")
 
         atexit.register(atexit_cleanup)
 
