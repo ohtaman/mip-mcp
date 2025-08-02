@@ -1,9 +1,10 @@
 """Configuration management utilities."""
 
 import os
-import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
+
+import yaml
 
 from ..models.config import Config
 
@@ -60,6 +61,8 @@ class ConfigManager:
                 return yaml.safe_load(f) or {}
         except yaml.YAMLError as e:
             raise ValueError(f"Invalid YAML in {config_path}: {e}")
+        except Exception as e:
+            raise ValueError(f"Error loading config file {config_path}: {e}")
     
     def _merge_dict(self, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
         """Recursively merge configuration dictionaries."""

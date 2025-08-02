@@ -284,11 +284,11 @@ async def execute_mip_code_with_mcp_progress(
         
     except Exception as e:
         # Clean up Pyodide if needed
-        if isinstance(executor, PyodideExecutor):
-            try:
+        try:
+            if 'executor' in locals() and hasattr(executor, 'cleanup'):
                 await executor.cleanup()
-            except:
-                pass
+        except:
+            pass
         
         if "security" in str(e).lower():
             logger.error(f"Security error: {e}")
@@ -511,11 +511,11 @@ async def execute_mip_code_with_progress(
         
     except Exception as e:
         # Clean up Pyodide if needed
-        if isinstance(executor, PyodideExecutor):
-            try:
+        try:
+            if 'executor' in locals() and hasattr(executor, 'cleanup'):
                 await executor.cleanup()
-            except:
-                pass
+        except:
+            pass
         
         if "security" in str(e).lower():
             logger.error(f"Security error: {e}")
@@ -627,7 +627,8 @@ async def validate_mip_code_handler(
         return ValidationResponse(
             status="error",
             message=f"Validation failed: {e}",
-            issues=[]
+            issues=[],
+            is_valid=False
         )
 
 
@@ -819,5 +820,6 @@ model += mip.xsum(weights[item] * x[item] for item in items) <= capacity
     return ExamplesResponse(
         status="success",
         examples=example_models,
-        total_examples=len(examples)
+        total_examples=len(examples),
+        message="Examples retrieved successfully"
     )
