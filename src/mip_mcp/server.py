@@ -124,33 +124,6 @@ class MIPMCPServer:
             """
             return await get_mip_examples_handler()
         
-        @self.app.tool()
-        async def health_check(ctx: Context) -> Dict[str, Any]:
-            """Check if the server is running properly.
-            
-            Returns:
-                Server status and version information.
-            """
-            try:
-                # Test solver availability
-                solver_info = await get_solver_info_handler(
-                    config=self.config_manager.config.model_dump()
-                )
-                
-                return {
-                    "status": "healthy",
-                    "version": self.config.server.version,
-                    "server_name": self.config.server.name,
-                    "solver_available": solver_info.get("status") == "success",
-                    "timestamp": None  # FastMCP might add this
-                }
-            except Exception as e:
-                logger.error(f"Health check failed: {e}")
-                return {
-                    "status": "unhealthy",
-                    "error": str(e)
-                }
-        
         logger.info("MCP tools registered successfully")
     
     def run(self, show_banner: bool = True):
