@@ -1,6 +1,6 @@
 """Sample optimization problems for testing."""
 
-SIMPLE_LP = '''
+SIMPLE_LP = """
 import pulp
 
 # Simple Linear Programming Problem
@@ -13,16 +13,16 @@ y = pulp.LpVariable("y", lowBound=0)
 # Objective
 prob += 3*x + 2*y
 
-# Constraints  
+# Constraints
 prob += 2*x + y <= 20
 prob += 4*x + 5*y <= 10
 prob += -x + 2*y <= 2
 
 # Solve
 prob.solve()
-'''
+"""
 
-KNAPSACK_PROBLEM = '''
+KNAPSACK_PROBLEM = """
 import pulp
 
 # 0-1 Knapsack Problem
@@ -43,14 +43,14 @@ prob += pulp.lpSum([weights[i] * x[i] for i in range(len(weights))]) <= capacity
 
 # Solve
 prob.solve()
-'''
+"""
 
-TRANSPORTATION_PROBLEM = '''
+TRANSPORTATION_PROBLEM = """
 import pulp
 
 # Transportation Problem
 supply = [20, 30, 25]
-demand = [15, 25, 35] 
+demand = [15, 25, 35]
 costs = [
     [4, 6, 8],
     [5, 3, 7],
@@ -60,28 +60,28 @@ costs = [
 prob = pulp.LpProblem("Transportation", pulp.LpMinimize)
 
 # Variables: amount shipped from supply i to demand j
-x = [[pulp.LpVariable(f"x_{i}_{j}", lowBound=0) 
-      for j in range(len(demand))] 
+x = [[pulp.LpVariable(f"x_{i}_{j}", lowBound=0)
+      for j in range(len(demand))]
      for i in range(len(supply))]
 
 # Objective: minimize total cost
-prob += pulp.lpSum([costs[i][j] * x[i][j] 
-                   for i in range(len(supply)) 
+prob += pulp.lpSum([costs[i][j] * x[i][j]
+                   for i in range(len(supply))
                    for j in range(len(demand))])
 
 # Supply constraints
 for i in range(len(supply)):
     prob += pulp.lpSum([x[i][j] for j in range(len(demand))]) <= supply[i]
 
-# Demand constraints  
+# Demand constraints
 for j in range(len(demand)):
     prob += pulp.lpSum([x[i][j] for i in range(len(supply))]) >= demand[j]
 
 # Solve
 prob.solve()
-'''
+"""
 
-INVALID_SYNTAX = '''
+INVALID_SYNTAX = """
 import pulp
 
 # Invalid syntax
@@ -93,9 +93,9 @@ prob += x >= "not_a_number"
 
 # Solve
 prob.solve()
-'''
+"""
 
-SECURITY_VIOLATION = '''
+SECURITY_VIOLATION = """
 import os
 import subprocess
 import pulp
@@ -114,9 +114,9 @@ x = pulp.LpVariable("x", lowBound=0)
 prob += x
 prob += x <= 10
 prob.solve()
-'''
+"""
 
-NO_PROBLEM_DEFINED = '''
+NO_PROBLEM_DEFINED = """
 import pulp
 import numpy as np
 
@@ -128,9 +128,9 @@ print(f"Sum is: {result}")
 # No LpProblem created
 x = 42
 y = x * 2
-'''
+"""
 
-COMPLEX_INTEGER_PROGRAM = '''
+COMPLEX_INTEGER_PROGRAM = """
 import pulp
 
 # Complex Integer Programming Problem
@@ -144,8 +144,8 @@ bin_capacity = 25
 prob = pulp.LpProblem("Bin_Packing", pulp.LpMinimize)
 
 # Binary variables: x[i][j] = 1 if item i is in bin j
-x = [[pulp.LpVariable(f"x_{i}_{j}", cat='Binary') 
-      for j in range(n_bins)] 
+x = [[pulp.LpVariable(f"x_{i}_{j}", cat='Binary')
+      for j in range(n_bins)]
      for i in range(n_items)]
 
 # Binary variables: y[j] = 1 if bin j is used
@@ -164,4 +164,4 @@ for j in range(n_bins):
 
 # Solve
 prob.solve()
-'''
+"""

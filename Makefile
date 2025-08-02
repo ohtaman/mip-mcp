@@ -12,8 +12,8 @@ help:
 	@echo "  test-unit     Run unit tests only"
 	@echo "  test-integration  Run integration tests only"
 	@echo "  coverage      Run tests with coverage report"
-	@echo "  lint          Run linting (black, isort, mypy)"
-	@echo "  format        Format code with black and isort"
+	@echo "  lint          Run linting with ruff"
+	@echo "  format        Format code with ruff"
 	@echo "  clean         Clean cache and build artifacts"
 
 # Installation
@@ -48,13 +48,15 @@ coverage-all:
 
 # Code quality
 lint:
-	uv run black --check src/ tests/
-	uv run isort --check-only src/ tests/
-	uv run mypy src/
+	uv run ruff check src/ tests/
 
 format:
-	uv run black src/ tests/
-	uv run isort src/ tests/
+	uv run ruff format src/ tests/
+	uv run ruff check --fix src/ tests/
+
+lint-check:
+	uv run ruff check src/ tests/
+	uv run ruff format --check src/ tests/
 
 # Cleanup
 clean:

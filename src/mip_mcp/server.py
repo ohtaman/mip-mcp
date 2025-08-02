@@ -1,68 +1,74 @@
 """MIP MCP Server implementation."""
 
-from typing import Optional, Dict, Any
+from typing import Any
 
-from fastmcp import FastMCP, Context
-
-from .models.responses import ExecutionResponse, SolverInfoResponse, ValidationResponse, ExamplesResponse
+from fastmcp import Context, FastMCP
 
 from .handlers.execute_code import (
     execute_mip_code_with_mcp_progress,
+    get_mip_examples_handler,
     get_solver_info_handler,
     validate_mip_code_handler,
-    get_mip_examples_handler
+)
+from .models.responses import (
+    ExamplesResponse,
+    ExecutionResponse,
+    SolverInfoResponse,
+    ValidationResponse,
 )
 from .utils.config_manager import ConfigManager
-from .utils.logger import setup_logging, get_logger
+from .utils.logger import get_logger, setup_logging
 
 logger = get_logger(__name__)
 
 
 class MIPMCPServer:
     """MIP MCP Server for Mathematical Optimization (PuLP)."""
-    
-    def __init__(self, config_path: Optional[str] = None):
+
+    def __init__(self, config_path: str | None = None):
         """Initialize the MCP server.
-        
+
         Args:
             config_path: Path to configuration directory or file
         """
         # Load configuration
         self.config_manager = ConfigManager(config_path)
         self.config = self.config_manager.get_config()
-        
+
         # Setup logging
         setup_logging(self.config_manager)
-        
+
         # Initialize FastMCP app
         self.app = FastMCP("mip-mcp")
-        
+
         # Register MCP tools
         self._register_tools()
-        
-        logger.info(f"MIP MCP Server initialized (version: {self.config.server.version})")
-    
+
+        logger.info(
+            f"MIP MCP Server initialized (version: {self.config.server.version})"
+        )
+
     def _register_tools(self):
         """Register MCP tools with the FastMCP app."""
-        
+
         @self.app.tool()
         async def execute_mip_code(
             ctx: Context,
             code: str,
-            data: Optional[Dict[str, Any]] = None,
-            solver: Optional[str] = None,
-            solver_params: Optional[Dict[str, Any]] = None,
+            data: dict[str, Any] | None = None,
+            solver: str | None = None,
+            solver_params: dict[str, Any] | None = None,
             validate_solution: bool = True,
             validation_tolerance: float = 1e-6,
-            include_solver_output: bool = False
+            include_solver_output: bool = False,
         ) -> ExecutionResponse:
             """Execute PuLP optimization code and solve the problem.
-            
+
             Executes PuLP Python code to create and solve optimization problems:
             - Define variables, constraints, and objectives
             - Solve linear and integer programming problems
             - Get optimal solutions with variable values
-            
+
             Args:
                 code: PuLP Python code defining the optimization problem
                 data: Optional data dictionary to pass to your code
@@ -71,7 +77,7 @@ class MIPMCPServer:
                 validate_solution: Whether to validate the solution (default: True)
                 validation_tolerance: Tolerance for constraint validation (default: 1e-6)
                 include_solver_output: Include detailed solver output in response (default: False)
-                
+
             Returns:
                 Optimization results including solution status, objective value, and variable values.
             """
@@ -84,56 +90,52 @@ class MIPMCPServer:
                 validate_solution=validate_solution,
                 validation_tolerance=validation_tolerance,
                 include_solver_output=include_solver_output,
-                config=self.config_manager.config.model_dump()
+                config=self.config_manager.config.model_dump(),
             )
-        
+
         @self.app.tool()
         async def get_solver_info(ctx: Context) -> SolverInfoResponse:
             """Get information about the optimization solver.
-            
+
             Returns:
                 Solver name, version, and supported problem types.
             """
             return await get_solver_info_handler(
                 config=self.config_manager.config.model_dump()
             )
-        
+
         @self.app.tool()
-        async def validate_mip_code(
-            ctx: Context,
-            code: str
-        ) -> ValidationResponse:
+        async def validate_mip_code(ctx: Context, code: str) -> ValidationResponse:
             """Validate PuLP code before execution.
-            
+
             Checks code for syntax errors and potential issues before running.
-            
+
             Args:
                 code: PuLP Python code to validate
-                
+
             Returns:
                 Validation status and any issues found.
             """
             return await validate_mip_code_handler(
-                code=code,
-                config=self.config_manager.config.model_dump()
+                code=code, config=self.config_manager.config.model_dump()
             )
-        
+
         @self.app.tool()
         async def get_mip_examples(ctx: Context) -> ExamplesResponse:
             """Get example optimization code snippets.
-            
+
             Provides ready-to-use PuLP examples:
             - Linear programming problems
-            - Integer programming problems  
+            - Integer programming problems
             - Common optimization scenarios
-            
+
             Returns:
                 Example code snippets with descriptions.
             """
             return await get_mip_examples_handler()
-        
+
         logger.info("MCP tools registered successfully")
-    
+
     def run(self, show_banner: bool = True):
         """Run the MCP server."""
         try:
