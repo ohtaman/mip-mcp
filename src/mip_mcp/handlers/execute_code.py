@@ -375,8 +375,8 @@ async def execute_mip_code_with_mcp_progress(
                 message=f"An unexpected error occurred: {e}",
                 stdout="",
                 stderr="",
-            solution=None,
-        )
+                solution=None,
+            )
 
 
 async def execute_mip_code_with_progress(
@@ -413,9 +413,13 @@ async def execute_mip_code_with_progress(
         """Callback to capture progress updates."""
         try:
             # Put progress in queue for async processing
-            task = asyncio.create_task(progress_queue.put(ProgressResponse(progress=progress)))
+            task = asyncio.create_task(
+                progress_queue.put(ProgressResponse(progress=progress))
+            )
             # Add done callback to handle any exceptions
-            task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+            task.add_done_callback(
+                lambda t: t.exception() if not t.cancelled() else None
+            )
         except Exception as e:
             logger.warning(f"Failed to queue progress update: {e}")
 

@@ -123,7 +123,9 @@ class SCIPSolver(BaseSolver):
                 # Create task for async callback
                 task = asyncio.create_task(self.progress_callback(progress))
                 # Add done callback to handle any exceptions
-                task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+                task.add_done_callback(
+                    lambda t: t.exception() if not t.cancelled() else None
+                )
             else:
                 self.progress_callback(progress)
 

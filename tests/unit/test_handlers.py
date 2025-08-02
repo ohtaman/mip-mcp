@@ -74,11 +74,15 @@ class TestExecuteCodeHandler:
         )
         mock_solver.set_progress_callback = Mock()  # Make it synchronous
 
-        with patch(
-            "mip_mcp.handlers.execute_code.PyodideExecutor", return_value=mock_executor
-        ), patch(
-            "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
-            return_value=mock_solver,
+        with (
+            patch(
+                "mip_mcp.handlers.execute_code.PyodideExecutor",
+                return_value=mock_executor,
+            ),
+            patch(
+                "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
+                return_value=mock_solver,
+            ),
         ):
             result = await execute_mip_code_handler(
                 code=SIMPLE_LP, config=handler_config
@@ -124,11 +128,15 @@ class TestExecuteCodeHandler:
         )
         mock_solver.set_progress_callback = Mock()
 
-        with patch(
-            "mip_mcp.handlers.execute_code.PyodideExecutor", return_value=mock_executor
-        ), patch(
-            "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
-            return_value=mock_solver,
+        with (
+            patch(
+                "mip_mcp.handlers.execute_code.PyodideExecutor",
+                return_value=mock_executor,
+            ),
+            patch(
+                "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
+                return_value=mock_solver,
+            ),
         ):
             result = await execute_mip_code_handler(
                 code=SIMPLE_LP, data=test_data, config=handler_config
@@ -189,11 +197,15 @@ class TestExecuteCodeHandler:
             )
         )
 
-        with patch(
-            "mip_mcp.handlers.execute_code.PyodideExecutor", return_value=mock_executor
-        ), patch(
-            "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
-            return_value=mock_solver,
+        with (
+            patch(
+                "mip_mcp.handlers.execute_code.PyodideExecutor",
+                return_value=mock_executor,
+            ),
+            patch(
+                "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
+                return_value=mock_solver,
+            ),
         ):
             result = await execute_mip_code_handler(
                 code=SIMPLE_LP, config=handler_config
@@ -229,14 +241,19 @@ class TestExecuteCodeHandler:
         # Mock solver output capture
         solver_output = "SCIP optimization completed successfully\\nObjective: 9.0"
 
-        with patch(
-            "mip_mcp.handlers.execute_code.PyodideExecutor", return_value=mock_executor
-        ), patch(
-            "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
-            return_value=mock_solver,
-        ), patch(
-            "mip_mcp.handlers.execute_code.SCIPSolver.capture_solver_output",
-            return_value=solver_output,
+        with (
+            patch(
+                "mip_mcp.handlers.execute_code.PyodideExecutor",
+                return_value=mock_executor,
+            ),
+            patch(
+                "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
+                return_value=mock_solver,
+            ),
+            patch(
+                "mip_mcp.handlers.execute_code.SCIPSolver.capture_solver_output",
+                return_value=solver_output,
+            ),
         ):
             result = await execute_mip_code_handler(
                 code=SIMPLE_LP,
@@ -254,7 +271,6 @@ class TestExecuteCodeHandler:
         """Test code execution with MCP progress reporting."""
         mock_context = Mock()
         mock_context.report_progress = AsyncMock()
-
 
         def mock_executor_with_progress():
             executor = AsyncMock()
@@ -304,12 +320,15 @@ class TestExecuteCodeHandler:
             )
         )
 
-        with patch(
-            "mip_mcp.handlers.execute_code.PyodideExecutor",
-            side_effect=mock_executor_with_progress,
-        ), patch(
-            "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
-            return_value=mock_solver,
+        with (
+            patch(
+                "mip_mcp.handlers.execute_code.PyodideExecutor",
+                side_effect=mock_executor_with_progress,
+            ),
+            patch(
+                "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
+                return_value=mock_solver,
+            ),
         ):
             result = await execute_mip_code_with_mcp_progress(
                 code=SIMPLE_LP, mcp_context=mock_context, config=handler_config
@@ -332,12 +351,15 @@ class TestExecuteCodeHandler:
             "capabilities": ["Linear Programming", "Integer Programming"],
         }
 
-        with patch(
-            "mip_mcp.handlers.execute_code.SolverFactory.get_available_solvers",
-            return_value=["scip"],
-        ), patch(
-            "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
-            return_value=mock_solver,
+        with (
+            patch(
+                "mip_mcp.handlers.execute_code.SolverFactory.get_available_solvers",
+                return_value=["scip"],
+            ),
+            patch(
+                "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
+                return_value=mock_solver,
+            ),
         ):
             result = await get_solver_info_handler(config=handler_config)
 
@@ -469,14 +491,19 @@ class TestExecuteCodeHandler:
             )
         )
 
-        with patch(
-            "mip_mcp.handlers.execute_code.PyodideExecutor", return_value=mock_executor
-        ), patch(
-            "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
-            return_value=mock_solver,
-        ), patch(
-            "mip_mcp.handlers.execute_code.SolutionValidator",
-            return_value=mock_validator,
+        with (
+            patch(
+                "mip_mcp.handlers.execute_code.PyodideExecutor",
+                return_value=mock_executor,
+            ),
+            patch(
+                "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
+                return_value=mock_solver,
+            ),
+            patch(
+                "mip_mcp.handlers.execute_code.SolutionValidator",
+                return_value=mock_validator,
+            ),
         ):
             result = await execute_mip_code_handler(
                 code=SIMPLE_LP, validate_solution=True, config=handler_config
@@ -526,12 +553,16 @@ class TestExecuteCodeHandler:
         mock_solver.set_parameters = Mock()
 
         # Test with explicit SCIP solver
-        with patch(
-            "mip_mcp.handlers.execute_code.PyodideExecutor", return_value=mock_executor
-        ), patch(
-            "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
-            return_value=mock_solver,
-        ) as mock_factory:
+        with (
+            patch(
+                "mip_mcp.handlers.execute_code.PyodideExecutor",
+                return_value=mock_executor,
+            ),
+            patch(
+                "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
+                return_value=mock_solver,
+            ) as mock_factory,
+        ):
             result = await execute_mip_code_handler(
                 code=SIMPLE_LP,
                 solver="scip",  # Explicitly specify solver
@@ -585,12 +616,16 @@ class TestExecuteCodeHandler:
         mock_solver.set_parameters = Mock()
 
         # Test without specifying solver (should use default)
-        with patch(
-            "mip_mcp.handlers.execute_code.PyodideExecutor", return_value=mock_executor
-        ), patch(
-            "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
-            return_value=mock_solver,
-        ) as mock_factory:
+        with (
+            patch(
+                "mip_mcp.handlers.execute_code.PyodideExecutor",
+                return_value=mock_executor,
+            ),
+            patch(
+                "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
+                return_value=mock_solver,
+            ) as mock_factory,
+        ):
             result = await execute_mip_code_handler(
                 code=SIMPLE_LP,
                 # solver parameter not specified
@@ -610,11 +645,15 @@ class TestExecuteCodeHandler:
         mock_executor.set_progress_callback = Mock()
 
         # Test with invalid solver name
-        with patch(
-            "mip_mcp.handlers.execute_code.PyodideExecutor", return_value=mock_executor
-        ), patch(
-            "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
-            side_effect=ValueError("Unsupported solver: invalid_solver"),
+        with (
+            patch(
+                "mip_mcp.handlers.execute_code.PyodideExecutor",
+                return_value=mock_executor,
+            ),
+            patch(
+                "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
+                side_effect=ValueError("Unsupported solver: invalid_solver"),
+            ),
         ):
             result = await execute_mip_code_handler(
                 code=SIMPLE_LP, solver="invalid_solver", config=handler_config
@@ -637,12 +676,15 @@ class TestExecuteCodeHandler:
             "file_formats": ["mps", "lp"],
         }
 
-        with patch(
-            "mip_mcp.handlers.execute_code.SolverFactory.get_available_solvers",
-            return_value=["scip"],
-        ), patch(
-            "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
-            return_value=mock_scip_solver,
+        with (
+            patch(
+                "mip_mcp.handlers.execute_code.SolverFactory.get_available_solvers",
+                return_value=["scip"],
+            ),
+            patch(
+                "mip_mcp.handlers.execute_code.SolverFactory.create_solver",
+                return_value=mock_scip_solver,
+            ),
         ):
             result = await get_solver_info_handler(config=handler_config)
 

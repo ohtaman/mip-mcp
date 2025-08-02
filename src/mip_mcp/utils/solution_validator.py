@@ -173,15 +173,18 @@ class SolutionValidator:
                         "violation": rhs_value - lhs_value,
                         "type": "lower_bound",
                     }
-            elif sense == pulp.LpConstraintEQ and abs(lhs_value - rhs_value) > self.tolerance:  # ==
-                    return {
-                        "constraint_name": constraint_name,
-                        "lhs_value": lhs_value,
-                        "sense": "==",
-                        "rhs_value": rhs_value,
-                        "violation": abs(lhs_value - rhs_value),
-                        "type": "equality",
-                    }
+            elif (
+                sense == pulp.LpConstraintEQ
+                and abs(lhs_value - rhs_value) > self.tolerance
+            ):  # ==
+                return {
+                    "constraint_name": constraint_name,
+                    "lhs_value": lhs_value,
+                    "sense": "==",
+                    "rhs_value": rhs_value,
+                    "violation": abs(lhs_value - rhs_value),
+                    "type": "equality",
+                }
 
         except ImportError:
             logger.error("PuLP not available for constraint sense checking")
@@ -207,15 +210,15 @@ class SolutionValidator:
                         and var.lowBound is not None
                         and value < var.lowBound - self.tolerance
                     ):
-                            violations.append(
-                                {
-                                    "variable": var.name,
-                                    "value": value,
-                                    "bound_type": "lower",
-                                    "bound_value": var.lowBound,
-                                    "violation": var.lowBound - value,
-                                }
-                            )
+                        violations.append(
+                            {
+                                "variable": var.name,
+                                "value": value,
+                                "bound_type": "lower",
+                                "bound_value": var.lowBound,
+                                "violation": var.lowBound - value,
+                            }
+                        )
 
                     # Check upper bound
                     if (
@@ -223,15 +226,15 @@ class SolutionValidator:
                         and var.upBound is not None
                         and value > var.upBound + self.tolerance
                     ):
-                            violations.append(
-                                {
-                                    "variable": var.name,
-                                    "value": value,
-                                    "bound_type": "upper",
-                                    "bound_value": var.upBound,
-                                    "violation": value - var.upBound,
-                                }
-                            )
+                        violations.append(
+                            {
+                                "variable": var.name,
+                                "value": value,
+                                "bound_type": "upper",
+                                "bound_value": var.upBound,
+                                "violation": value - var.upBound,
+                            }
+                        )
 
         except Exception as e:
             logger.error(f"Error checking variable bounds: {e}")
