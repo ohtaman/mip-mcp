@@ -272,10 +272,15 @@ class TestServerSignalHandling:
         
         # Mock ExecutorRegistry to simulate active executors
         with (
-            patch.object(ExecutorRegistry, '_executors', {'mock_executor'}),
+            patch.object(ExecutorRegistry, 'get_active_count', return_value=2),
             patch.object(ExecutorRegistry, 'cleanup_all', return_value=None) as mock_cleanup,
-            patch('asyncio.run') as mock_asyncio_run,
+            patch('asyncio.new_event_loop') as mock_new_loop,
+            patch('asyncio.set_event_loop') as mock_set_loop,
         ):
+            # Create mock loop
+            mock_loop = MagicMock()
+            mock_new_loop.return_value = mock_loop
+            
             # Get the atexit cleanup function and call it
             import atexit
             with patch('atexit.register') as mock_atexit:
@@ -286,7 +291,10 @@ class TestServerSignalHandling:
             cleanup_func()
             
             # Verify cleanup was attempted
-            mock_asyncio_run.assert_called_once()
+            mock_new_loop.assert_called_once()
+            mock_set_loop.assert_called_once_with(mock_loop)
+            mock_loop.run_until_complete.assert_called_once()
+            mock_loop.close.assert_called_once()
 
 
 class TestProcessGroupManagement:
