@@ -41,6 +41,10 @@ class PyodideExecutor:
             "execution_timeout", 60.0
         )  # Execution timeout for MCP
 
+        # Track temporary files for cleanup
+        self._temp_files: list[str] = []
+        self._script_file: str | None = None
+
         # Create isolated temporary directory for this executor instance
         self.temp_dir = tempfile.mkdtemp(prefix="mip_mcp_executor_")
         logger.info(
@@ -175,6 +179,7 @@ class PyodideExecutor:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
                 f.write(self._get_pyodide_script(pyodide_path))
                 script_path = f.name
+                self._script_file = script_path  # Track for cleanup
 
             try:
                 # Create a new Node.js process to run Pyodide
@@ -232,6 +237,7 @@ class PyodideExecutor:
                 # Clean up script file
                 with contextlib.suppress(OSError, FileNotFoundError):
                     Path(script_path).unlink()
+                self._script_file = None  # Clear tracking
 
         except Exception as e:
             logger.error(f"Failed to initialize Pyodide: {e}")
@@ -922,6 +928,9 @@ globals()['__json_result__'] = __json_result__
         with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False) as f:
             temp_path = f.name
 
+        # Track temporary file for cleanup
+        self._temp_files.append(temp_path)
+
         # Copy the file content
         shutil.copy2(source_path, temp_path)
 
@@ -1053,6 +1062,30 @@ globals()['__json_result__'] = __json_result__
                 self.pyodide_process = None
                 self._pyodide_initialized = False
                 logger.info("Pyodide process cleanup completed")
+
+        # Clean up tracked temporary files
+        if hasattr(self, "_temp_files"):
+            for temp_file in self._temp_files:
+                try:
+                    with contextlib.suppress(OSError, FileNotFoundError):
+                        Path(temp_file).unlink()
+                    logger.debug(f"Cleaned up temporary file: {temp_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {temp_file}: {e}")
+            self._temp_files.clear()
+
+        # Clean up Node.js script file if it still exists
+        if hasattr(self, "_script_file") and self._script_file:
+            try:
+                with contextlib.suppress(OSError, FileNotFoundError):
+                    Path(self._script_file).unlink()
+                logger.debug(f"Cleaned up script file: {self._script_file}")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to clean up script file {self._script_file}: {e}"
+                )
+            finally:
+                self._script_file = None
 
         # Clean up isolated temporary directory
         if hasattr(self, "temp_dir") and self.temp_dir:
