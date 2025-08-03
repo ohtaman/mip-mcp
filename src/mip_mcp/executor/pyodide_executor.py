@@ -905,7 +905,7 @@ globals()['__json_result__'] = __json_result__
                 for next_line in next_lines:
                     if "[(" in next_line and ")]" in next_line:
                         warnings.append(
-                            f"Lines {i}-{i+len(next_lines)}: Potential tuple key creation in loop. "
+                            f"Lines {i}-{i + len(next_lines)}: Potential tuple key creation in loop. "
                             "Consider using string keys for Pyodide compatibility."
                         )
                         break
