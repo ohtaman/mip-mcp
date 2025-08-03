@@ -85,14 +85,19 @@ class PyodideManager:
     async def _find_npm_pyodide(cls) -> str | None:
         """Find pyodide installation via npm/node."""
         try:
+            # Add temporary npm directory to search paths
+            import tempfile
+
+            temp_npm_dir = Path(tempfile.gettempdir()) / "mip-mcp-npm"
+
             proc = await asyncio.create_subprocess_exec(
                 "node",
                 "-e",
-                """
-try {
+                f"""
+try {{
     console.log(require.resolve('pyodide'));
-} catch (e) {
-    // Try alternative paths
+}} catch (e) {{
+    // Try alternative paths including temporary npm directory
     const path = require('path');
     const fs = require('fs');
 
@@ -100,18 +105,19 @@ try {
         path.join(process.cwd(), 'node_modules', 'pyodide'),
         path.join(process.cwd(), '..', 'node_modules', 'pyodide'),
         path.join(process.cwd(), '..', '..', 'node_modules', 'pyodide'),
-        path.join(__dirname, '..', '..', 'node_modules', 'pyodide')
+        path.join(__dirname, '..', '..', 'node_modules', 'pyodide'),
+        path.join('{temp_npm_dir}', 'node_modules', 'pyodide')
     ];
 
-    for (const searchPath of searchPaths) {
+    for (const searchPath of searchPaths) {{
         const pyodidePath = path.join(searchPath, 'pyodide.js');
-        if (fs.existsSync(pyodidePath)) {
+        if (fs.existsSync(pyodidePath)) {{
             console.log(pyodidePath);
             process.exit(0);
-        }
-    }
+        }}
+    }}
     process.exit(1);
-}
+}}
                 """,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -136,33 +142,73 @@ try {
             logger.debug("npm not available for auto-installation")
             return False
 
-        # Find project root with package.json
+        # Try multiple installation strategies
+        strategies = [
+            cls._npm_install_in_project_root,
+            cls._npm_install_global_temp,
+        ]
+
+        for strategy in strategies:
+            try:
+                if await strategy():
+                    return True
+            except Exception as e:
+                logger.debug(f"Strategy {strategy.__name__} failed: {e}")
+                continue
+
+        return False
+
+    @classmethod
+    async def _npm_install_in_project_root(cls) -> bool:
+        """Install pyodide in project root if package.json exists."""
         project_root = cls._find_project_root()
         if not project_root or not (project_root / "package.json").exists():
-            logger.debug("No package.json found for npm install")
             return False
 
-        try:
-            logger.info("Auto-installing Pyodide via npm...")
-            proc = await asyncio.create_subprocess_exec(
-                "npm",
-                "install",
-                cwd=project_root,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+        logger.info("Installing Pyodide via npm in project root...")
+        proc = await asyncio.create_subprocess_exec(
+            "npm",
+            "install",
+            cwd=project_root,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
 
-            stdout, stderr = await proc.communicate()
+        stdout, stderr = await proc.communicate()
+        if proc.returncode == 0:
+            logger.info("npm install completed successfully")
+            return True
+        else:
+            logger.warning(f"npm install failed: {stderr.decode()}")
+            return False
 
-            if proc.returncode == 0:
-                logger.info("npm install completed successfully")
-                return True
-            else:
-                logger.warning(f"npm install failed: {stderr.decode()}")
-                return False
+    @classmethod
+    async def _npm_install_global_temp(cls) -> bool:
+        """Install pyodide in a temporary directory."""
+        temp_dir = Path(tempfile.gettempdir()) / "mip-mcp-npm"
+        temp_dir.mkdir(exist_ok=True)
 
-        except Exception as e:
-            logger.warning(f"Auto-installation failed: {e}")
+        # Create a minimal package.json for pyodide installation
+        package_json = temp_dir / "package.json"
+        if not package_json.exists():
+            package_json.write_text('{"name": "mip-mcp-pyodide", "version": "1.0.0"}')
+
+        logger.info("Installing Pyodide via npm in temporary directory...")
+        proc = await asyncio.create_subprocess_exec(
+            "npm",
+            "install",
+            "pyodide@0.28.0",
+            cwd=temp_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        stdout, stderr = await proc.communicate()
+        if proc.returncode == 0:
+            logger.info("Pyodide installed successfully in temporary directory")
+            return True
+        else:
+            logger.warning(f"npm install pyodide failed: {stderr.decode()}")
             return False
 
     @classmethod
@@ -187,19 +233,66 @@ try {
 
             pyodide_js = temp_dir / "pyodide.js"
             if pyodide_js.exists():
-                return str(pyodide_js)
+                # Check if other required files exist
+                required_files = [
+                    "pyodide.asm.js",
+                    "pyodide.asm.wasm",
+                    "python_stdlib.zip",
+                ]
+                if all((temp_dir / f).exists() for f in required_files):
+                    return str(pyodide_js)
 
-            # Download Pyodide
-            logger.info("Downloading Pyodide...")
+            # Download Pyodide complete package
+            logger.info("Downloading Pyodide complete package...")
             async with aiohttp.ClientSession() as session:
-                # Download pyodide.js directly (minimal version)
-                url = "https://cdn.jsdelivr.net/pyodide/v0.28.0/full/pyodide.js"
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        with pyodide_js.open("wb") as f:
-                            f.write(await response.read())
-                        logger.info("Pyodide downloaded successfully")
-                        return str(pyodide_js)
+                base_url = "https://cdn.jsdelivr.net/pyodide/v0.28.0/full"
+
+                # List of required Pyodide files
+                files_to_download = [
+                    "pyodide.js",
+                    "pyodide.asm.js",
+                    "pyodide.asm.wasm",
+                    "python_stdlib.zip",
+                    "pyodide_py.tar",  # Python packages
+                ]
+
+                # Download all required files
+                for filename in files_to_download:
+                    file_path = temp_dir / filename
+                    if file_path.exists():
+                        continue  # Skip if already downloaded
+
+                    url = f"{base_url}/{filename}"
+                    logger.debug(f"Downloading {filename}...")
+
+                    try:
+                        async with session.get(url) as response:
+                            if response.status == 200:
+                                with file_path.open("wb") as f:
+                                    f.write(await response.read())
+                                logger.debug(f"Downloaded {filename}")
+                            else:
+                                logger.warning(
+                                    f"Failed to download {filename}: HTTP {response.status}"
+                                )
+                                # Continue with other files
+                    except Exception as e:
+                        logger.warning(f"Error downloading {filename}: {e}")
+                        # Continue with other files
+
+                # Verify essential files are present
+                essential_files = ["pyodide.js", "pyodide.asm.js", "pyodide.asm.wasm"]
+                if all((temp_dir / f).exists() for f in essential_files):
+                    logger.info("Pyodide essential files downloaded successfully")
+                    return str(pyodide_js)
+                else:
+                    missing = [
+                        f for f in essential_files if not (temp_dir / f).exists()
+                    ]
+                    logger.error(
+                        f"Failed to download essential Pyodide files: {missing}"
+                    )
+                    return None
 
         except ImportError:
             logger.debug("aiohttp not available for download")
