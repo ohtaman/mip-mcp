@@ -339,7 +339,8 @@ let pyodide = null;
 
 const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stderr  // Use stderr to avoid JSON output conflicts
+    output: process.stderr,  // Use stderr to avoid JSON output conflicts
+    historySize: 0  // Disable history to save memory
 });
 
 async function initPyodide() {
@@ -434,11 +435,47 @@ rl.on('line', async (input) => {
                 response = { success: false, error: 'Unknown action' };
         }
 
-        console.log(JSON.stringify(response));
+        sendResponse(response);
     } catch (error) {
-        console.log(JSON.stringify({ success: false, error: error.message }));
+        sendResponse({ success: false, error: error.message });
     }
 });
+
+function sendResponse(response) {
+    const jsonString = JSON.stringify(response);
+    const maxChunkSize = 32768;  // 32KB chunks
+
+    if (jsonString.length <= maxChunkSize) {
+        // Send as single line for backward compatibility
+        console.log(jsonString);
+    } else {
+        // Send as chunked response
+        const chunks = [];
+        for (let i = 0; i < jsonString.length; i += maxChunkSize) {
+            chunks.push(jsonString.substring(i, i + maxChunkSize));
+        }
+
+        // Send chunked header
+        console.log(JSON.stringify({
+            __chunked: true,
+            __total_chunks: chunks.length,
+            __chunk_size: maxChunkSize
+        }));
+
+        // Send each chunk
+        for (let i = 0; i < chunks.length; i++) {
+            console.log(JSON.stringify({
+                __chunk_index: i,
+                __chunk_data: chunks[i]
+            }));
+        }
+
+        // Send end marker
+        console.log(JSON.stringify({
+            __chunked_end: true
+        }));
+    }
+}
 
 // Handle process cleanup
 process.on('SIGINT', () => process.exit(0));
@@ -462,14 +499,14 @@ console.error('DEBUG: Node.js process ready for commands');
             self.pyodide_process.stdin.write(request_json.encode())
             await self.pyodide_process.stdin.drain()
 
-            # Read response with timeout
-            response_line = await asyncio.wait_for(
+            # Read first response line with timeout
+            first_line = await asyncio.wait_for(
                 self.pyodide_process.stdout.readline(),
                 timeout=self.execution_timeout + 10.0,  # Allow for execution + margin
             )
-            response_str = response_line.decode().strip()
+            first_response_str = first_line.decode().strip()
 
-            if not response_str:
+            if not first_response_str:
                 # Try to read stderr for error info
                 try:
                     stderr_data = await asyncio.wait_for(
@@ -484,9 +521,17 @@ console.error('DEBUG: Node.js process ready for commands');
                     return {"success": False, "error": "Empty response from Pyodide"}
 
             try:
-                return json.loads(response_str)
+                first_response = json.loads(first_response_str)
+
+                # Check if this is a chunked response
+                if isinstance(first_response, dict) and first_response.get("__chunked"):
+                    return await self._read_chunked_response(first_response)
+                else:
+                    # Regular single-line response
+                    return first_response
+
             except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON response: {response_str}")
+                logger.error(f"Invalid JSON response: {first_response_str}")
                 return {"success": False, "error": f"Invalid JSON response: {e}"}
 
         except TimeoutError:
@@ -495,6 +540,85 @@ console.error('DEBUG: Node.js process ready for commands');
         except Exception as e:
             logger.error(f"Communication with Pyodide failed: {e}")
             return {"success": False, "error": str(e)}
+
+    async def _read_chunked_response(self, header: dict[str, Any]) -> dict[str, Any]:
+        """Read a chunked response from Pyodide process."""
+        try:
+            total_chunks = header.get("__total_chunks", 0)
+            chunk_size = header.get("__chunk_size", 32768)
+
+            logger.info(
+                f"Reading chunked response: {total_chunks} chunks, {chunk_size} bytes each"
+            )
+
+            # Read all chunks
+            chunks = [""] * total_chunks
+            chunks_received = 0
+
+            while chunks_received < total_chunks:
+                chunk_line = await asyncio.wait_for(
+                    self.pyodide_process.stdout.readline(),
+                    timeout=30.0,  # Generous timeout for chunk reading
+                )
+                chunk_str = chunk_line.decode().strip()
+
+                if not chunk_str:
+                    return {"success": False, "error": "Empty chunk received"}
+
+                try:
+                    chunk_data = json.loads(chunk_str)
+
+                    if chunk_data.get("__chunked_end"):
+                        # End marker received, break early
+                        break
+
+                    chunk_index = chunk_data.get("__chunk_index")
+                    chunk_content = chunk_data.get("__chunk_data", "")
+
+                    if chunk_index is not None and 0 <= chunk_index < total_chunks:
+                        chunks[chunk_index] = chunk_content
+                        chunks_received += 1
+                    else:
+                        logger.warning(f"Invalid chunk index: {chunk_index}")
+
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid chunk JSON: {e}")
+                    return {"success": False, "error": f"Invalid chunk JSON: {e}"}
+
+            # Wait for end marker if not received yet
+            if chunks_received == total_chunks:
+                try:
+                    end_line = await asyncio.wait_for(
+                        self.pyodide_process.stdout.readline(),
+                        timeout=5.0,
+                    )
+                    end_str = end_line.decode().strip()
+                    if end_str:
+                        end_data = json.loads(end_str)
+                        if not end_data.get("__chunked_end"):
+                            logger.warning("Expected end marker not received")
+                except Exception:
+                    logger.warning("Failed to read end marker")
+
+            # Reassemble the response
+            full_json_str = "".join(chunks)
+            logger.info(f"Reassembled response: {len(full_json_str)} characters")
+
+            try:
+                return json.loads(full_json_str)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse reassembled JSON: {e}")
+                return {
+                    "success": False,
+                    "error": f"Failed to parse reassembled JSON: {e}",
+                }
+
+        except TimeoutError:
+            logger.error("Timeout reading chunked response")
+            return {"success": False, "error": "Timeout reading chunked response"}
+        except Exception as e:
+            logger.error(f"Error reading chunked response: {e}")
+            return {"success": False, "error": f"Error reading chunked response: {e}"}
 
     async def execute_mip_code(
         self,
