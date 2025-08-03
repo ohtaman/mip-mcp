@@ -25,8 +25,8 @@ def mcp_main():
     server = MIPMCPServer()
 
     try:
-        # Let FastMCP handle everything naturally
-        server.app.run(show_banner=False)
+        # Use server.run() method for proper initialization
+        server.run(show_banner=False)
     except KeyboardInterrupt:
         # This shouldn't be reached due to our signal handler
         print("\nShutdown complete.", file=sys.stderr)

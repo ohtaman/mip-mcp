@@ -13,6 +13,7 @@ from typing import Any
 from ..models.responses import SolverProgress
 from ..utils.library_detector import MIPLibrary, MIPLibraryDetector
 from ..utils.logger import get_logger
+from ..utils.pyodide_manager import PyodideManager
 
 logger = get_logger(__name__)
 
@@ -156,12 +157,18 @@ class PyodideExecutor:
         try:
             logger.info("Initializing Pyodide environment...")
 
-            # Find pyodide path first
-            pyodide_path = await self._find_pyodide_path()
+            # Get pyodide path from manager (should be available from server startup)
+            pyodide_path = PyodideManager.get_pyodide_path()
             if not pyodide_path:
-                raise RuntimeError(
-                    "Pyodide module not found. Please install: npm install pyodide"
-                )
+                # Fallback: try to ensure pyodide is available
+                logger.info("Pyodide not ready, attempting to initialize...")
+                if await PyodideManager.ensure_pyodide_available():
+                    pyodide_path = PyodideManager.get_pyodide_path()
+
+                if not pyodide_path:
+                    raise RuntimeError(
+                        "Pyodide module not found. Server may not have initialized properly."
+                    )
 
             logger.info(f"Found Pyodide at: {pyodide_path}")
 

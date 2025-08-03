@@ -21,6 +21,7 @@ from .models.responses import (
 from .utils.config_manager import ConfigManager
 from .utils.executor_registry import ExecutorRegistry
 from .utils.logger import get_logger, setup_logging
+from .utils.pyodide_manager import PyodideManager
 
 logger = get_logger(__name__)
 
@@ -43,6 +44,9 @@ class MIPMCPServer:
 
         # Initialize FastMCP app
         self.app = FastMCP("mip-mcp")
+
+        # Initialize Pyodide (async, will be called during run)
+        self._pyodide_initialized = False
 
         # Setup cleanup hooks
         self._setup_cleanup_hooks()
@@ -180,8 +184,66 @@ class MIPMCPServer:
 
         logger.info("MCP tools registered successfully")
 
+    async def _initialize_pyodide(self):
+        """Initialize Pyodide during server startup."""
+        if self._pyodide_initialized:
+            return
+
+        logger.info("Initializing Pyodide environment...")
+        success = await PyodideManager.ensure_pyodide_available()
+
+        if success:
+            pyodide_path = PyodideManager.get_pyodide_path()
+            logger.info(f"Pyodide ready at: {pyodide_path}")
+            self._pyodide_initialized = True
+        else:
+            logger.warning(
+                "Pyodide initialization failed. Code execution may not work properly. "
+                "Consider installing Node.js and running 'npm install pyodide'"
+            )
+
     def run(self, show_banner: bool = True):
         """Run the MCP server."""
         logger.info("Starting MIP MCP Server...")
+
+        # Check Pyodide availability at startup for better user experience
+        self._check_pyodide_sync()
+
         # Let FastMCP handle signals and shutdown naturally
         self.app.run(show_banner=show_banner)
+
+    def _check_pyodide_sync(self):
+        """Quick synchronous check for Pyodide availability."""
+        try:
+            # Check bundled first
+            bundled_path = PyodideManager._check_bundled_pyodide()
+            if bundled_path:
+                PyodideManager._pyodide_path = bundled_path
+                logger.info(f"✓ Pyodide ready (bundled): {bundled_path}")
+                return
+
+            # Check various locations for package.json
+            from pathlib import Path
+
+            possible_roots = [
+                Path.cwd(),  # Current working directory
+                Path(
+                    __file__
+                ).parent.parent.parent,  # Project root relative to this file
+                Path.cwd(),  # Alternative current directory
+            ]
+
+            package_json_found = False
+            for root in possible_roots:
+                if (root / "package.json").exists():
+                    logger.info(f"✓ Pyodide setup ready - auto-install from {root}")
+                    package_json_found = True
+                    break
+
+            if not package_json_found:
+                logger.info(
+                    "Pyodide will be downloaded automatically when needed. "
+                    "For fastest startup, consider: npm install pyodide"
+                )
+        except Exception as e:
+            logger.error(f"Error during Pyodide availability check: {e}")
