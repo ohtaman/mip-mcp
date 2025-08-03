@@ -267,51 +267,121 @@ class PyodideExecutor:
             ) from e
 
     async def _find_pyodide_path(self) -> str | None:
-        """Find bundled pyodide installation path."""
+        """Find bundled pyodide installation path using Python detection."""
         try:
-            # Pyodide is bundled during build, so we only need to check bundled locations
-            proc = await asyncio.create_subprocess_exec(
-                "node",
-                "-e",
-                """
-const path = require('path');
-const fs = require('fs');
+            # Use Python to find bundled Pyodide files directly
+            pyodide_path = self._find_bundled_pyodide()
+            if pyodide_path:
+                logger.info(f"Found bundled Pyodide at: {pyodide_path}")
+                return pyodide_path
 
-// Check for bundled Pyodide files (from wheel shared-data)
-const bundledPaths = [
-    // In site-packages/mip_mcp/pyodide/ (standard wheel installation)
-    path.join(__dirname, '..', '..', '..', 'mip_mcp', 'pyodide', 'pyodide.js'),
-    path.join(__dirname, '..', '..', 'mip_mcp', 'pyodide', 'pyodide.js'),
-    // Development: node_modules from build process
-    path.join(process.cwd(), 'node_modules', 'pyodide', 'pyodide.js')
-];
+            # If bundled Pyodide not found, try automatic npm install fallback
+            logger.info(
+                "Bundled Pyodide not found, attempting automatic npm install..."
+            )
+            return await self._install_pyodide_fallback()
 
-for (const pyodidePath of bundledPaths) {
-    if (fs.existsSync(pyodidePath)) {
-        console.log(pyodidePath);
-        process.exit(0);
-    }
-}
+        except Exception as e:
+            logger.error(f"Failed to find pyodide path: {e}")
+            return None
 
-// If we reach here, bundling failed during build
-console.error('PYODIDE_NOT_FOUND');
-process.exit(1);
-                """,
+    def _find_bundled_pyodide(self) -> str | None:
+        """Find bundled Pyodide using Python path detection."""
+        import sys
+
+        # Method 1: Check uvx environment (cache structure)
+        try:
+            python_exe = Path(sys.executable)
+            # For uvx: /path/to/cache/bin/python -> /path/to/cache/mip_mcp/pyodide/pyodide.js
+            cache_root = python_exe.parent.parent
+            pyodide_js = cache_root / "mip_mcp" / "pyodide" / "pyodide.js"
+            if pyodide_js.exists():
+                return str(pyodide_js)
+        except Exception as e:
+            logger.debug(f"uvx detection failed: {e}")
+
+        # Method 2: Check standard package installation
+        try:
+            # Get the current module path
+            current_module = Path(__file__).resolve()
+            # Go up: .../mip_mcp/executor/pyodide_executor.py -> .../mip_mcp
+            package_root = current_module.parent.parent
+            pyodide_js = package_root / "pyodide" / "pyodide.js"
+            if pyodide_js.exists():
+                return str(pyodide_js)
+        except Exception as e:
+            logger.debug(f"standard package detection failed: {e}")
+
+        # Method 3: Development fallback (node_modules)
+        try:
+            cwd = Path.cwd()
+            node_modules_pyodide = cwd / "node_modules" / "pyodide" / "pyodide.js"
+            if node_modules_pyodide.exists():
+                return str(node_modules_pyodide)
+        except Exception as e:
+            logger.debug(f"development fallback failed: {e}")
+
+        return None
+
+    async def _install_pyodide_fallback(self) -> str | None:
+        """Attempt to install Pyodide via npm as fallback for missing bundled files."""
+        try:
+            # Check if npm is available
+            npm_check = await asyncio.create_subprocess_exec(
+                "npm",
+                "--version",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await npm_check.communicate()
+
+            if npm_check.returncode != 0:
+                logger.error(
+                    "npm not found. Please install Node.js and npm to use Pyodide execution."
+                )
+                return None
+
+            logger.info("Installing Pyodide via npm (this may take a moment)...")
+
+            # Install pyodide in current working directory
+            install_proc = await asyncio.create_subprocess_exec(
+                "npm",
+                "install",
+                "pyodide@^0.27.7",
+                "--silent",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            stdout, stderr = await proc.communicate()
+            stdout, stderr = await install_proc.communicate()
 
-            if proc.returncode == 0:
+            if install_proc.returncode != 0:
+                logger.error(f"Failed to install Pyodide: {stderr.decode()}")
+                return None
+
+            logger.info("Pyodide installed successfully!")
+
+            # Verify installation and return path
+            verify_proc = await asyncio.create_subprocess_exec(
+                "node",
+                "-e",
+                "console.log(require.resolve('pyodide/pyodide.js'));",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            stdout, stderr = await verify_proc.communicate()
+
+            if verify_proc.returncode == 0:
                 path = stdout.decode().strip()
-                if path and not path.startswith("PYODIDE_NOT_FOUND"):
-                    return path
-
-            return None
+                logger.info(f"Pyodide installed at: {path}")
+                return path
+            else:
+                logger.error("Failed to verify Pyodide installation")
+                return None
 
         except Exception as e:
-            logger.error(f"Failed to find pyodide path: {e}")
+            logger.error(f"Failed to install Pyodide automatically: {e}")
             return None
 
     def _get_pyodide_script(self, pyodide_path: str) -> str:
