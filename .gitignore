@@ -11,3 +11,7 @@ wheels/
 
 # tmp files
 .tmp
+
+# Node.js dependencies (downloaded during build)
+node_modules/
+package-lock.json

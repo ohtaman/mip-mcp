@@ -261,36 +261,35 @@ class PyodideExecutor:
             ) from e
 
     async def _find_pyodide_path(self) -> str | None:
-        """Find pyodide installation path (simplified)."""
+        """Find bundled pyodide installation path."""
         try:
-            # Simple approach: try require.resolve first, then common paths
+            # Pyodide is bundled during build, so we only need to check bundled locations
             proc = await asyncio.create_subprocess_exec(
                 "node",
                 "-e",
                 """
-try {
-    console.log(require.resolve('pyodide'));
-} catch (e) {
-    // Try a few common paths if require.resolve fails
-    const path = require('path');
-    const fs = require('fs');
+const path = require('path');
+const fs = require('fs');
 
-    const searchPaths = [
-        path.join(process.cwd(), 'node_modules', 'pyodide', 'pyodide.js'),
-        path.join(__dirname, '..', 'node_modules', 'pyodide', 'pyodide.js'),
-        '/usr/local/lib/node_modules/pyodide/pyodide.js'
-    ];
+// Check for bundled Pyodide files (from wheel shared-data)
+const bundledPaths = [
+    // In site-packages/mip_mcp/pyodide/ (standard wheel installation)
+    path.join(__dirname, '..', '..', '..', 'mip_mcp', 'pyodide', 'pyodide.js'),
+    path.join(__dirname, '..', '..', 'mip_mcp', 'pyodide', 'pyodide.js'),
+    // Development: node_modules from build process
+    path.join(process.cwd(), 'node_modules', 'pyodide', 'pyodide.js')
+];
 
-    for (const pyodidePath of searchPaths) {
-        if (fs.existsSync(pyodidePath)) {
-            console.log(pyodidePath);
-            process.exit(0);
-        }
+for (const pyodidePath of bundledPaths) {
+    if (fs.existsSync(pyodidePath)) {
+        console.log(pyodidePath);
+        process.exit(0);
     }
-
-    console.error('PYODIDE_NOT_FOUND');
-    process.exit(1);
 }
+
+// If we reach here, bundling failed during build
+console.error('PYODIDE_NOT_FOUND');
+process.exit(1);
                 """,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
