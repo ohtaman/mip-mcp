@@ -45,8 +45,8 @@
 ### Business Analyst Use Cases
 
 #### UC-001: Supply Chain Optimization
-**As a** supply chain analyst  
-**I want to** optimize inventory distribution across warehouses  
+**As a** supply chain analyst
+**I want to** optimize inventory distribution across warehouses
 **So that** I can minimize costs while meeting demand requirements
 
 **Acceptance Criteria:**
@@ -56,8 +56,8 @@
 - Export results to Excel for presentation
 
 #### UC-002: Resource Allocation
-**As a** project manager  
-**I want to** allocate team members to projects optimally  
+**As a** project manager
+**I want to** allocate team members to projects optimally
 **So that** I can maximize productivity while respecting skill requirements
 
 **Acceptance Criteria:**
@@ -69,8 +69,8 @@
 ### Operations Research Practitioner Use Cases
 
 #### UC-003: Model Development Acceleration
-**As an** OR analyst  
-**I want to** quickly formulate complex optimization models  
+**As an** OR analyst
+**I want to** quickly formulate complex optimization models
 **So that** I can focus on analysis rather than implementation
 
 **Acceptance Criteria:**
@@ -80,8 +80,8 @@
 - Generate code for multiple solver platforms
 
 #### UC-004: Performance Optimization
-**As an** optimization engineer  
-**I want to** improve solver performance on large models  
+**As an** optimization engineer
+**I want to** improve solver performance on large models
 **So that** I can solve problems within acceptable timeframes
 
 **Acceptance Criteria:**
@@ -93,8 +93,8 @@
 ### Data Scientist Use Cases
 
 #### UC-005: Workflow Integration
-**As a** data scientist  
-**I want to** integrate optimization into my ML pipeline  
+**As a** data scientist
+**I want to** integrate optimization into my ML pipeline
 **So that** I can create end-to-end decision support systems
 
 **Acceptance Criteria:**
@@ -104,8 +104,8 @@
 - Automate recurring optimization workflows
 
 #### UC-006: Experiment Management
-**As a** research scientist  
-**I want to** run multiple optimization experiments  
+**As a** research scientist
+**I want to** run multiple optimization experiments
 **So that** I can compare different approaches systematically
 
 **Acceptance Criteria:**
@@ -117,8 +117,8 @@
 ### Executive Use Cases
 
 #### UC-007: Strategic Decision Support
-**As an** executive  
-**I want to** understand optimization recommendations  
+**As an** executive
+**I want to** understand optimization recommendations
 **So that** I can make informed strategic decisions
 
 **Acceptance Criteria:**
@@ -128,8 +128,8 @@
 - Access results on mobile devices
 
 #### UC-008: Performance Monitoring
-**As a** department head  
-**I want to** monitor optimization system performance  
+**As a** department head
+**I want to** monitor optimization system performance
 **So that** I can ensure business objectives are met
 
 **Acceptance Criteria:**

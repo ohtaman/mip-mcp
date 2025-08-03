@@ -241,9 +241,36 @@ class PyodideExecutor:
                 f"Error waiting for Pyodide process readiness: {e}"
             ) from e
 
+    def _check_bundled_pyodide(self) -> str | None:
+        """Check for bundled pyodide installation (from wheel)."""
+        try:
+            # Check if bundled pyodide files exist (installed from wheel)
+            import pkg_resources
+
+            try:
+                pyodide_js_path = pkg_resources.resource_filename(
+                    "mip_mcp", "pyodide/pyodide.js"
+                )
+                if Path(pyodide_js_path).exists():
+                    return pyodide_js_path
+            except (ImportError, FileNotFoundError):
+                pass
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Error checking bundled pyodide: {e}")
+            return None
+
     async def _find_pyodide_path(self) -> str | None:
         """Find pyodide installation path."""
         try:
+            # First check for bundled pyodide (from wheel installation)
+            bundled_path = self._check_bundled_pyodide()
+            if bundled_path:
+                logger.info(f"Using bundled pyodide at: {bundled_path}")
+                return bundled_path
+
             # Try to find pyodide using Node.js
             proc = await asyncio.create_subprocess_exec(
                 "node",

@@ -35,6 +35,7 @@ dev = [
     "pytest-asyncio>=1.1.0",
     "pytest-cov>=6.2.1",
     "ruff>=0.12.7",
+    "pre-commit>=4.0.0",
 ]
 
 [tool.ruff]
@@ -83,11 +84,22 @@ ignore = [
     "S101",   # Use of assert detected
     "PLR2004", # Magic value used in comparison
 ]
+"src/mip_mcp/utils/library_detector.py" = [
+    "N802",   # Function name should be lowercase (AST visitor methods exception)
+]
 
 [tool.ruff.format]
 # コードフォーマット設定
 quote-style = "double"
 indent-style = "space"
-skip-magic-trailing-comma = false
-line-ending = "auto"
 
+# Package data configuration for bundled pyodide files
+[tool.hatch.build.targets.wheel]
+packages = ["src/mip_mcp"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"node_modules/pyodide/pyodide.js" = "mip_mcp/pyodide/pyodide.js"
+"node_modules/pyodide/pyodide.asm.js" = "mip_mcp/pyodide/pyodide.asm.js"
+"node_modules/pyodide/pyodide.asm.wasm" = "mip_mcp/pyodide/pyodide.asm.wasm"
+"node_modules/pyodide/pyodide-lock.json" = "mip_mcp/pyodide/pyodide-lock.json"
+"node_modules/pyodide/python_stdlib.zip" = "mip_mcp/pyodide/python_stdlib.zip"

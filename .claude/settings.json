@@ -68,7 +68,8 @@
       "Bash(git rebase:*)",
       "Bash(curl:*)",
       "Bash(wget:*)",
-      "Bash(uv:*)"
+      "Bash(uv:*)",
+      "Bash(gh:*view*)"
     ],
     "deny": [
       "Bash(sudo:*)",
