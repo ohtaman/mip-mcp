@@ -4,7 +4,6 @@ import asyncio
 import logging
 import shutil
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +11,7 @@ logger = logging.getLogger(__name__)
 class NodeDependencyManager:
     """Manages Node.js dependencies for uvx installations."""
 
-    def __init__(self, project_root: Optional[Path] = None):
+    def __init__(self, project_root: Path | None = None):
         """Initialize dependency manager.
 
         Args:
