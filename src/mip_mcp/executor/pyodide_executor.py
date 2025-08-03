@@ -13,7 +13,6 @@ from typing import Any
 from ..models.responses import SolverProgress
 from ..utils.library_detector import MIPLibrary, MIPLibraryDetector
 from ..utils.logger import get_logger
-from ..utils.pyodide_manager import PyodideManager
 
 logger = get_logger(__name__)
 
@@ -161,18 +160,12 @@ class PyodideExecutor:
         try:
             logger.info("Initializing Pyodide environment...")
 
-            # Get pyodide path from manager (should be available from server startup)
-            pyodide_path = PyodideManager.get_pyodide_path()
+            # Find pyodide installation (simple approach)
+            pyodide_path = await self._find_pyodide_path()
             if not pyodide_path:
-                # Fallback: try to ensure pyodide is available
-                logger.info("Pyodide not ready, attempting to initialize...")
-                if await PyodideManager.ensure_pyodide_available():
-                    pyodide_path = PyodideManager.get_pyodide_path()
-
-                if not pyodide_path:
-                    raise RuntimeError(
-                        "Pyodide module not found. Server may not have initialized properly."
-                    )
+                raise RuntimeError(
+                    "Pyodide not found. Please install with: npm install pyodide"
+                )
 
             logger.info(f"Found Pyodide at: {pyodide_path}")
 
@@ -267,37 +260,10 @@ class PyodideExecutor:
                 f"Error waiting for Pyodide process readiness: {e}"
             ) from e
 
-    def _check_bundled_pyodide(self) -> str | None:
-        """Check for bundled pyodide installation (from wheel)."""
-        try:
-            # Check if bundled pyodide files exist (installed from wheel)
-            import pkg_resources
-
-            try:
-                pyodide_js_path = pkg_resources.resource_filename(
-                    "mip_mcp", "pyodide/pyodide.js"
-                )
-                if Path(pyodide_js_path).exists():
-                    return pyodide_js_path
-            except (ImportError, FileNotFoundError):
-                pass
-
-            return None
-
-        except Exception as e:
-            logger.debug(f"Error checking bundled pyodide: {e}")
-            return None
-
     async def _find_pyodide_path(self) -> str | None:
-        """Find pyodide installation path."""
+        """Find pyodide installation path (simplified)."""
         try:
-            # First check for bundled pyodide (from wheel installation)
-            bundled_path = self._check_bundled_pyodide()
-            if bundled_path:
-                logger.info(f"Using bundled pyodide at: {bundled_path}")
-                return bundled_path
-
-            # Try to find pyodide using Node.js
+            # Simple approach: try require.resolve first, then common paths
             proc = await asyncio.create_subprocess_exec(
                 "node",
                 "-e",
@@ -305,21 +271,19 @@ class PyodideExecutor:
 try {
     console.log(require.resolve('pyodide'));
 } catch (e) {
-    // Try alternative paths
+    // Try a few common paths if require.resolve fails
     const path = require('path');
     const fs = require('fs');
 
     const searchPaths = [
-        path.join(process.cwd(), 'node_modules', 'pyodide'),
-        path.join(process.cwd(), '..', 'node_modules', 'pyodide'),
-        path.join(process.cwd(), '..', '..', 'node_modules', 'pyodide'),
-        path.join(__dirname, '..', '..', 'node_modules', 'pyodide')
+        path.join(process.cwd(), 'node_modules', 'pyodide', 'pyodide.js'),
+        path.join(__dirname, '..', 'node_modules', 'pyodide', 'pyodide.js'),
+        '/usr/local/lib/node_modules/pyodide/pyodide.js'
     ];
 
-    for (const searchPath of searchPaths) {
-        const packagePath = path.join(searchPath, 'package.json');
-        if (fs.existsSync(packagePath)) {
-            console.log(path.join(searchPath, 'pyodide.js'));
+    for (const pyodidePath of searchPaths) {
+        if (fs.existsSync(pyodidePath)) {
+            console.log(pyodidePath);
             process.exit(0);
         }
     }
