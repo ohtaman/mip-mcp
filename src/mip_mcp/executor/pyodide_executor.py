@@ -367,38 +367,44 @@ async function executePython(code) {
     try {
         const result = await pyodide.runPythonAsync(code);
 
-        // Extract globals and generate file content directly
-        const globals = pyodide.globals.toJs();
-        let lpContent = null;
-        let mpsContent = null;
-
-        // Look for PuLP problems in globals and generate content using virtual filesystem
-        for (const [name, obj] of Object.entries(globals)) {
-            if (obj && typeof obj === 'object' && obj.writeLP && obj.writeMPS) {
-                try {
-                    // Use Pyodide virtual filesystem to generate LP content
-                    await pyodide.runPythonAsync(`${name}.writeLP("/tmp/problem.lp")`);
-                    lpContent = pyodide.FS.readFile("/tmp/problem.lp", { encoding: "utf8" });
-
-                    // Use Pyodide virtual filesystem to generate MPS content
-                    await pyodide.runPythonAsync(`${name}.writeMPS("/tmp/problem.mps")`);
-                    mpsContent = pyodide.FS.readFile("/tmp/problem.mps", { encoding: "utf8" });
-
-                    break; // Use first problem found
-                } catch (e) {
-                    console.error('Error generating content:', e);
-                }
-            }
+        // Extract JSON result string (avoids ConversionError with tuple keys)
+        let jsonResultString = null;
+        try {
+            jsonResultString = pyodide.globals.get('__json_result__');
+        } catch (e) {
+            console.error('Failed to extract JSON result:', e);
+            return {
+                success: false,
+                error: `Failed to extract execution results: ${e.message}`,
+                traceback: e.stack
+            };
         }
 
-        // Add generated content to globals
-        if (lpContent) globals['__lp_content__'] = lpContent;
-        if (mpsContent) globals['__mps_content__'] = mpsContent;
+        if (!jsonResultString) {
+            return {
+                success: false,
+                error: 'No JSON result found in Python execution',
+                traceback: null
+            };
+        }
+
+        // Parse JSON result
+        let parsedResult = null;
+        try {
+            parsedResult = JSON.parse(jsonResultString);
+        } catch (e) {
+            console.error('Failed to parse JSON result:', e);
+            return {
+                success: false,
+                error: `Failed to parse execution results: ${e.message}`,
+                json_raw: jsonResultString.substring(0, 500) + '...'
+            };
+        }
 
         return {
             success: true,
             result: result,
-            globals: globals
+            json_data: parsedResult
         };
     } catch (error) {
         return {
@@ -535,7 +541,16 @@ console.error('DEBUG: Node.js process ready for commands');
             # Send progress for code preparation
             self._send_progress("modeling", "Preparing code for execution")
 
-            # Prepare execution code
+            # Check for tuple key patterns and provide warnings
+            tuple_warnings = self._detect_tuple_key_patterns(code)
+            if tuple_warnings:
+                logger.info(
+                    f"Detected potential tuple key patterns: {len(tuple_warnings)} warnings"
+                )
+                for warning in tuple_warnings:
+                    logger.warning(f"Tuple key pattern: {warning}")
+
+            # Prepare execution code with tuple key conversion
             execution_code = self._prepare_execution_code(code, data)
 
             # Send progress for execution
@@ -559,12 +574,32 @@ console.error('DEBUG: Node.js process ready for commands');
             # Send progress for result extraction
             self._send_progress("modeling", "Extracting optimization file content")
 
-            # Extract results
-            globals_dict = result.get("globals", {})
+            # Extract JSON results (new approach - no more ConversionError!)
+            json_data = result.get("json_data", {})
 
-            # Look for generated content
-            lp_content = globals_dict.get("__lp_content__")
-            mps_content = globals_dict.get("__mps_content__")
+            if not json_data:
+                return (
+                    "",
+                    "No JSON data returned from Pyodide execution",
+                    None,
+                    detected_library,
+                )
+
+            # Check execution status
+            execution_status = json_data.get("execution_status", "unknown")
+            if execution_status == "error":
+                error_msg = json_data.get("error_message", "Unknown error")
+                traceback_info = json_data.get("traceback", "")
+                return (
+                    json_data.get("stdout", ""),
+                    f"Execution error: {error_msg}\n{traceback_info}",
+                    None,
+                    detected_library,
+                )
+
+            # Extract content (LP preferred, then MPS)
+            lp_content = json_data.get("lp_content")
+            mps_content = json_data.get("mps_content")
 
             # Automatic format detection: LP preferred, then MPS
             content = None
@@ -577,8 +612,23 @@ console.error('DEBUG: Node.js process ready for commands');
                 file_format = "mps"
 
             if not content:
+                # Check if there were problems but failed to generate content
+                problems_info = json_data.get("problems_info", [])
+                if problems_info:
+                    problem_errors = [
+                        p.get("error") for p in problems_info if "error" in p
+                    ]
+                    if problem_errors:
+                        error_details = "; ".join(problem_errors)
+                        return (
+                            json_data.get("stdout", ""),
+                            f"Problem found but failed to generate content: {error_details}",
+                            None,
+                            detected_library,
+                        )
+
                 return (
-                    "",
+                    json_data.get("stdout", ""),
                     "No optimization file content generated",
                     None,
                     detected_library,
@@ -598,10 +648,20 @@ console.error('DEBUG: Node.js process ready for commands');
                 f"Optimization model generated successfully ({file_format.upper()} format)",
             )
 
-            # Get execution output
-            stdout = globals_dict.get(
-                "__stdout__", "Code executed successfully in Pyodide"
-            )
+            # Get execution output with tuple key conversion info
+            stdout = json_data.get("stdout", "Code executed successfully in Pyodide")
+
+            # Add information about variables that had tuple keys converted
+            variables_info = json_data.get("variables_info", {})
+            converted_vars = [
+                name
+                for name in variables_info
+                if "_" in name and any(char.isdigit() for char in name)
+            ]
+            if converted_vars:
+                stdout += f"\n\nNote: Successfully handled tuple keys in variables: {', '.join(converted_vars[:5])}"
+                if len(converted_vars) > 5:
+                    stdout += f" and {len(converted_vars) - 5} more"
 
             return stdout, "", temp_file, detected_library
 
@@ -633,6 +693,7 @@ console.error('DEBUG: Node.js process ready for commands');
 import io
 import sys
 import tempfile
+import json
 import pulp
 
 # Capture stdout
@@ -642,6 +703,106 @@ sys.stdout = __stdout_capture__
 # Setup data if provided
 {data_setup}
 
+def __convert_to_json_safe(obj, visited=None):
+    '''Convert objects to JSON-safe format, handling tuple keys and complex objects.'''
+    if visited is None:
+        visited = set()
+
+    # Avoid infinite recursion
+    obj_id = id(obj)
+    if obj_id in visited:
+        return f"<circular_reference_to_{{type(obj).__name__}}>"
+    visited.add(obj_id)
+
+    try:
+        if isinstance(obj, dict):
+            converted = {{}}
+            for key, value in obj.items():
+                # Convert tuple keys to string representation
+                if isinstance(key, tuple):
+                    str_key = "_".join(str(k) for k in key)
+                    converted[str_key] = __convert_to_json_safe(value, visited)
+                elif isinstance(key, (str, int, float, bool)) or key is None:
+                    converted[str(key)] = __convert_to_json_safe(value, visited)
+                else:
+                    # Convert other key types to string
+                    converted[str(key)] = __convert_to_json_safe(value, visited)
+            return converted
+        elif isinstance(obj, (list, tuple)):
+            return [__convert_to_json_safe(item, visited) for item in obj]
+        elif isinstance(obj, (str, int, float, bool)) or obj is None:
+            return obj
+        elif hasattr(obj, '__dict__'):
+            # Handle objects with attributes (like PuLP variables)
+            return {{
+                '__type__': type(obj).__name__,
+                '__module__': getattr(type(obj), '__module__', 'unknown'),
+                '__str__': str(obj),
+                '__repr__': repr(obj)
+            }}
+        else:
+            return str(obj)
+    except Exception:
+        return f"<unconvertible_{{type(obj).__name__}}>"
+    finally:
+        visited.discard(obj_id)
+
+def __extract_problem_info(globals_dict):
+    '''Extract PuLP problem information and generate LP/MPS content.'''
+    problems_info = []
+    lp_content = None
+    mps_content = None
+
+    for name, obj in globals_dict.items():
+        if hasattr(obj, 'writeLP') and hasattr(obj, 'writeMPS'):
+            try:
+                # Generate LP content
+                import tempfile
+                import os
+
+                # Create temporary files for LP and MPS
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.lp', delete=False) as lp_file:
+                    lp_path = lp_file.name
+
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.mps', delete=False) as mps_file:
+                    mps_path = mps_file.name
+
+                # Write LP and MPS files
+                obj.writeLP(lp_path)
+                obj.writeMPS(mps_path)
+
+                # Read content
+                with open(lp_path, 'r') as f:
+                    lp_content = f.read()
+
+                with open(mps_path, 'r') as f:
+                    mps_content = f.read()
+
+                # Clean up temporary files
+                os.unlink(lp_path)
+                os.unlink(mps_path)
+
+                problem_info = {{
+                    'name': name,
+                    'sense': str(getattr(obj, 'sense', 'unknown')),
+                    'status': str(getattr(obj, 'status', 'unknown')),
+                    'num_variables': len(getattr(obj, 'variables', [])),
+                    'num_constraints': len(getattr(obj, 'constraints', [])),
+                    'objective': str(getattr(obj, 'objective', 'none'))
+                }}
+                problems_info.append(problem_info)
+
+                # Use first problem found
+                break
+
+            except Exception as e:
+                problems_info.append({{
+                    'name': name,
+                    'error': f"Failed to extract problem info: {{e}}"
+                }})
+
+    return problems_info, lp_content, mps_content
+
 try:
     # Execute user code
 {self._indent_code(user_code, 4)}
@@ -650,8 +811,35 @@ try:
     sys.stdout = sys.__stdout__
     __stdout__ = __stdout_capture__.getvalue()
 
-    # Note: LP/MPS content generation is now handled in Node.js side
-    # for better Pyodide integration
+    # Extract and serialize all relevant information as JSON
+    __globals_copy = dict(globals())
+
+    # Find and extract PuLP problem information
+    __problems_info, __lp_content, __mps_content = __extract_problem_info(__globals_copy)
+
+    # Convert user variables to JSON-safe format
+    __variables_info = {{}}
+    for __var_name in list(__globals_copy.keys()):
+        if (not __var_name.startswith('_') and
+            __var_name not in ['pulp', 'io', 'sys', 'tempfile', 'json'] and
+            not callable(__globals_copy[__var_name])):
+            try:
+                __variables_info[__var_name] = __convert_to_json_safe(__globals_copy[__var_name])
+            except Exception as __e:
+                __variables_info[__var_name] = f"<conversion_error: {{__e}}>"
+
+    # Create comprehensive result data
+    __result_data = {{
+        'stdout': __stdout__,
+        'lp_content': __lp_content,
+        'mps_content': __mps_content,
+        'problems_info': __problems_info,
+        'variables_info': __variables_info,
+        'execution_status': 'success'
+    }}
+
+    # Serialize to JSON string
+    __json_result__ = json.dumps(__result_data, ensure_ascii=False, indent=None)
 
 except Exception as e:
     sys.stdout = sys.__stdout__
@@ -661,11 +849,68 @@ except Exception as e:
     import traceback
     __stdout__ += f"\\nTraceback: {{traceback.format_exc()}}"
 
-# Return results through global variables
-globals()['__stdout__'] = __stdout__
+    # Create error result data
+    __result_data = {{
+        'stdout': __stdout__,
+        'lp_content': None,
+        'mps_content': None,
+        'problems_info': [],
+        'variables_info': {{}},
+        'execution_status': 'error',
+        'error_message': str(e),
+        'traceback': traceback.format_exc()
+    }}
+
+    # Serialize error data to JSON
+    __json_result__ = json.dumps(__result_data, ensure_ascii=False, indent=None)
+
+# Store JSON result for extraction
+globals()['__json_result__'] = __json_result__
 """
 
         return wrapper_code
+
+    def _detect_tuple_key_patterns(self, code: str) -> list[str]:
+        """Detect potential tuple key patterns in user code that might cause ConversionError.
+
+        Args:
+            code: User's Python code
+
+        Returns:
+            List of warning messages about potential tuple key issues
+        """
+        warnings = []
+        lines = code.split("\n")
+
+        for i, line in enumerate(lines, 1):
+            line = line.strip()
+
+            # Look for dictionary assignments with tuple keys
+            if "[(" in line and ")]" in line and "=" in line:
+                warnings.append(
+                    f"Line {i}: Potential tuple key assignment detected: {line[:50]}... "
+                    "Consider using string keys instead: dict[f'{key1}_{key2}_{key3}'] = value"
+                )
+
+            # Look for tuple construction patterns
+            if (
+                "for " in line
+                and " in " in line
+                and "(" in line
+                and ")" in line
+                and any(keyword in line for keyword in ["range", "enumerate", "zip"])
+            ):
+                # This might be creating tuples for dictionary keys
+                next_lines = lines[i : i + 3] if i < len(lines) else []
+                for next_line in next_lines:
+                    if "[(" in next_line and ")]" in next_line:
+                        warnings.append(
+                            f"Lines {i}-{i + len(next_lines)}: Potential tuple key creation in loop. "
+                            "Consider using string keys for Pyodide compatibility."
+                        )
+                        break
+
+        return warnings
 
     def _indent_code(self, code: str, spaces: int) -> str:
         """Indent code by specified number of spaces."""
