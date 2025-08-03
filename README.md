@@ -77,6 +77,23 @@ cd mip-mcp
 pip install -e .
 ```
 
+#### Using uvx with GitHub Repository
+
+For direct execution without local installation:
+
+```bash
+# Method 1: Automatic dependency installation (recommended)
+uvx --from git+https://github.com/ohtaman/mip-mcp.git mip-mcp
+
+# Method 2: Manual setup if automatic installation fails
+git clone https://github.com/ohtaman/mip-mcp.git
+cd mip-mcp
+npm install  # Install Node.js dependencies
+uvx --from . mip-mcp
+```
+
+**Note**: When using uvx with GitHub repositories, Node.js dependencies (pyodide) are automatically installed on first run. If automatic installation fails, ensure you have npm installed and run `npm install` manually.
+
 ### Quick Start
 
 Start the MCP server:
