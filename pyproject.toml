@@ -98,6 +98,9 @@ indent-style = "space"
 [tool.hatch.build.targets.wheel]
 packages = ["src/mip_mcp"]
 
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "build_hooks.py"
+
 [tool.hatch.build.targets.wheel.shared-data]
 "node_modules/pyodide/pyodide.js" = "mip_mcp/pyodide/pyodide.js"
 "node_modules/pyodide/pyodide.asm.js" = "mip_mcp/pyodide/pyodide.asm.js"

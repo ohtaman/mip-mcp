@@ -1,0 +1,15 @@
+{
+  "name": "mip-mcp-pyodide-deps",
+  "version": "1.0.0",
+  "description": "Node.js dependencies for MIP-MCP Pyodide execution",
+  "private": true,
+  "scripts": {
+    "postinstall": "echo '✓ Pyodide installed successfully for bundling'"
+  },
+  "dependencies": {
+    "pyodide": "^0.27.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

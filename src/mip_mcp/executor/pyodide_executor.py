@@ -13,7 +13,6 @@ from typing import Any
 from ..models.responses import SolverProgress
 from ..utils.library_detector import MIPLibrary, MIPLibraryDetector
 from ..utils.logger import get_logger
-from ..utils.pyodide_manager import PyodideManager
 
 logger = get_logger(__name__)
 
@@ -42,7 +41,15 @@ class PyodideExecutor:
             "execution_timeout", 60.0
         )  # Execution timeout for MCP
 
-        logger.info("Pyodide executor initialized")
+        # Track temporary files for cleanup
+        self._temp_files: list[str] = []
+        self._script_file: str | None = None
+
+        # Create isolated temporary directory for this executor instance
+        self.temp_dir = tempfile.mkdtemp(prefix="mip_mcp_executor_")
+        logger.info(
+            f"Pyodide executor initialized with isolated temp dir: {self.temp_dir}"
+        )
 
     def set_progress_callback(
         self, callback: Callable[[SolverProgress], None] | None
@@ -157,18 +164,12 @@ class PyodideExecutor:
         try:
             logger.info("Initializing Pyodide environment...")
 
-            # Get pyodide path from manager (should be available from server startup)
-            pyodide_path = PyodideManager.get_pyodide_path()
+            # Find pyodide installation (simple approach)
+            pyodide_path = await self._find_pyodide_path()
             if not pyodide_path:
-                # Fallback: try to ensure pyodide is available
-                logger.info("Pyodide not ready, attempting to initialize...")
-                if await PyodideManager.ensure_pyodide_available():
-                    pyodide_path = PyodideManager.get_pyodide_path()
-
-                if not pyodide_path:
-                    raise RuntimeError(
-                        "Pyodide module not found. Server may not have initialized properly."
-                    )
+                raise RuntimeError(
+                    "Pyodide not found. Please install with: npm install pyodide"
+                )
 
             logger.info(f"Found Pyodide at: {pyodide_path}")
 
@@ -178,6 +179,7 @@ class PyodideExecutor:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
                 f.write(self._get_pyodide_script(pyodide_path))
                 script_path = f.name
+                self._script_file = script_path  # Track for cleanup
 
             try:
                 # Create a new Node.js process to run Pyodide
@@ -213,6 +215,21 @@ class PyodideExecutor:
                         f"Pyodide initialization failed: {init_result.get('error', 'unknown error')}"
                     )
 
+                # Mount the isolated temp directory
+                mount_result = await self._communicate_with_pyodide(
+                    {"action": "mount", "path": self.temp_dir}
+                )
+
+                if not mount_result.get("success"):
+                    logger.warning(
+                        f"Failed to mount temp directory: {mount_result.get('error')}"
+                    )
+                    # Continue anyway, fallback to virtual filesystem
+                else:
+                    logger.info(
+                        f"Mounted temp directory {self.temp_dir} to /mnt in Pyodide"
+                    )
+
                 self._pyodide_initialized = True
                 logger.info("Pyodide environment initialized successfully")
 
@@ -220,6 +237,7 @@ class PyodideExecutor:
                 # Clean up script file
                 with contextlib.suppress(OSError, FileNotFoundError):
                     Path(script_path).unlink()
+                self._script_file = None  # Clear tracking
 
         except Exception as e:
             logger.error(f"Failed to initialize Pyodide: {e}")
@@ -248,66 +266,36 @@ class PyodideExecutor:
                 f"Error waiting for Pyodide process readiness: {e}"
             ) from e
 
-    def _check_bundled_pyodide(self) -> str | None:
-        """Check for bundled pyodide installation (from wheel)."""
-        try:
-            # Check if bundled pyodide files exist (installed from wheel)
-            import pkg_resources
-
-            try:
-                pyodide_js_path = pkg_resources.resource_filename(
-                    "mip_mcp", "pyodide/pyodide.js"
-                )
-                if Path(pyodide_js_path).exists():
-                    return pyodide_js_path
-            except (ImportError, FileNotFoundError):
-                pass
-
-            return None
-
-        except Exception as e:
-            logger.debug(f"Error checking bundled pyodide: {e}")
-            return None
-
     async def _find_pyodide_path(self) -> str | None:
-        """Find pyodide installation path."""
+        """Find bundled pyodide installation path."""
         try:
-            # First check for bundled pyodide (from wheel installation)
-            bundled_path = self._check_bundled_pyodide()
-            if bundled_path:
-                logger.info(f"Using bundled pyodide at: {bundled_path}")
-                return bundled_path
-
-            # Try to find pyodide using Node.js
+            # Pyodide is bundled during build, so we only need to check bundled locations
             proc = await asyncio.create_subprocess_exec(
                 "node",
                 "-e",
                 """
-try {
-    console.log(require.resolve('pyodide'));
-} catch (e) {
-    // Try alternative paths
-    const path = require('path');
-    const fs = require('fs');
+const path = require('path');
+const fs = require('fs');
 
-    const searchPaths = [
-        path.join(process.cwd(), 'node_modules', 'pyodide'),
-        path.join(process.cwd(), '..', 'node_modules', 'pyodide'),
-        path.join(process.cwd(), '..', '..', 'node_modules', 'pyodide'),
-        path.join(__dirname, '..', '..', 'node_modules', 'pyodide')
-    ];
+// Check for bundled Pyodide files (from wheel shared-data)
+const bundledPaths = [
+    // In site-packages/mip_mcp/pyodide/ (standard wheel installation)
+    path.join(__dirname, '..', '..', '..', 'mip_mcp', 'pyodide', 'pyodide.js'),
+    path.join(__dirname, '..', '..', 'mip_mcp', 'pyodide', 'pyodide.js'),
+    // Development: node_modules from build process
+    path.join(process.cwd(), 'node_modules', 'pyodide', 'pyodide.js')
+];
 
-    for (const searchPath of searchPaths) {
-        const packagePath = path.join(searchPath, 'package.json');
-        if (fs.existsSync(packagePath)) {
-            console.log(path.join(searchPath, 'pyodide.js'));
-            process.exit(0);
-        }
+for (const pyodidePath of bundledPaths) {
+    if (fs.existsSync(pyodidePath)) {
+        console.log(pyodidePath);
+        process.exit(0);
     }
-
-    console.error('PYODIDE_NOT_FOUND');
-    process.exit(1);
 }
+
+// If we reach here, bundling failed during build
+console.error('PYODIDE_NOT_FOUND');
+process.exit(1);
                 """,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -357,6 +345,17 @@ async function initPyodide() {
             await micropip.install('pulp')
         `);
 
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+}
+
+async function mountTempDir(tempDirPath) {
+    try {
+        // Mount the host temp directory to /mnt in Pyodide filesystem
+        pyodide.FS.mkdir('/mnt');
+        pyodide.FS.mount(pyodide.FS.filesystems.NODEFS, { root: tempDirPath }, '/mnt');
         return { success: true };
     } catch (error) {
         return { success: false, error: error.message };
@@ -423,6 +422,9 @@ rl.on('line', async (input) => {
         switch (request.action) {
             case 'init':
                 response = await initPyodide();
+                break;
+            case 'mount':
+                response = await mountTempDir(request.path);
                 break;
             case 'execute':
                 response = await executePython(request.code);
@@ -597,22 +599,34 @@ console.error('DEBUG: Node.js process ready for commands');
                     detected_library,
                 )
 
-            # Extract content (LP preferred, then MPS)
-            lp_content = json_data.get("lp_content")
-            mps_content = json_data.get("mps_content")
+            # Get file paths from Pyodide execution and map to host filesystem
+            lp_file_path = json_data.get("lp_file_path")
+            mps_file_path = json_data.get("mps_file_path")
 
-            # Automatic format detection: LP preferred, then MPS
-            content = None
+            # Map Pyodide paths (/mnt/...) to host filesystem paths
+            host_lp_path = None
+            host_mps_path = None
+            if lp_file_path and lp_file_path.startswith("/mnt/"):
+                host_lp_path = str(
+                    Path(self.temp_dir) / lp_file_path[5:]
+                )  # Remove /mnt/ prefix
+            if mps_file_path and mps_file_path.startswith("/mnt/"):
+                host_mps_path = str(
+                    Path(self.temp_dir) / mps_file_path[5:]
+                )  # Remove /mnt/ prefix
+
+            # Determine which file to use (LP preferred, then MPS)
+            source_file_path = None
             file_format = None
-            if lp_content:
-                content = lp_content
+            if host_lp_path and Path(host_lp_path).exists():
+                source_file_path = host_lp_path
                 file_format = "lp"
-            elif mps_content:
-                content = mps_content
+            elif host_mps_path and Path(host_mps_path).exists():
+                source_file_path = host_mps_path
                 file_format = "mps"
 
-            if not content:
-                # Check if there were problems but failed to generate content
+            if not source_file_path:
+                # Check if there were problems but failed to generate files
                 problems_info = json_data.get("problems_info", [])
                 if problems_info:
                     problem_errors = [
@@ -622,25 +636,25 @@ console.error('DEBUG: Node.js process ready for commands');
                         error_details = "; ".join(problem_errors)
                         return (
                             json_data.get("stdout", ""),
-                            f"Problem found but failed to generate content: {error_details}",
+                            f"Problem found but failed to generate files: {error_details}",
                             None,
                             detected_library,
                         )
 
                 return (
                     json_data.get("stdout", ""),
-                    "No optimization file content generated",
+                    "No optimization file generated",
                     None,
                     detected_library,
                 )
 
-            # Send progress for file generation
+            # Send progress for file processing
             self._send_progress(
-                "modeling", f"Generating {file_format.upper()} optimization file"
+                "modeling", f"Processing {file_format.upper()} optimization file"
             )
 
-            # Write content to temporary file
-            temp_file = self._create_temp_file(content, file_format)
+            # Copy file from isolated directory to a new temporary file for return
+            temp_file = self._copy_optimization_file(source_file_path, file_format)
 
             # Send final modeling progress
             self._send_progress(
@@ -689,6 +703,9 @@ console.error('DEBUG: Node.js process ready for commands');
         if data:
             data_setup = f"__data__ = {json.dumps(data)}\n"
 
+        # Pass isolated temp directory to Pyodide
+        temp_dir_setup = f"__temp_dir__ = '{self.temp_dir}'\n"
+
         wrapper_code = f"""
 import io
 import sys
@@ -702,6 +719,8 @@ sys.stdout = __stdout_capture__
 
 # Setup data if provided
 {data_setup}
+# Setup isolated temp directory
+{temp_dir_setup}
 
 def __convert_to_json_safe(obj, visited=None):
     '''Convert objects to JSON-safe format, handling tuple keys and complex objects.'''
@@ -748,39 +767,24 @@ def __convert_to_json_safe(obj, visited=None):
         visited.discard(obj_id)
 
 def __extract_problem_info(globals_dict):
-    '''Extract PuLP problem information and generate LP/MPS content.'''
+    '''Extract PuLP problem information and write files to mounted filesystem.'''
     problems_info = []
-    lp_content = None
-    mps_content = None
+    lp_file_path = None
+    mps_file_path = None
 
     for name, obj in globals_dict.items():
         if hasattr(obj, 'writeLP') and hasattr(obj, 'writeMPS'):
             try:
-                # Generate LP content
-                import tempfile
-                import os
+                import time
 
-                # Create temporary files for LP and MPS
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.lp', delete=False) as lp_file:
-                    lp_path = lp_file.name
+                # Use mounted filesystem at /mnt with unique filenames
+                unique_id = str(int(time.time() * 1000000) % 100000000)
+                lp_file_path = f"/mnt/problem_{{unique_id}}.lp"
+                mps_file_path = f"/mnt/problem_{{unique_id}}.mps"
 
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.mps', delete=False) as mps_file:
-                    mps_path = mps_file.name
-
-                # Write LP and MPS files
-                obj.writeLP(lp_path)
-                obj.writeMPS(mps_path)
-
-                # Read content
-                with open(lp_path, 'r') as f:
-                    lp_content = f.read()
-
-                with open(mps_path, 'r') as f:
-                    mps_content = f.read()
-
-                # Clean up temporary files
-                os.unlink(lp_path)
-                os.unlink(mps_path)
+                # Write LP and MPS files to mounted filesystem (accessible from host)
+                obj.writeLP(lp_file_path)
+                obj.writeMPS(mps_file_path)
 
                 problem_info = {{
                     'name': name,
@@ -788,7 +792,9 @@ def __extract_problem_info(globals_dict):
                     'status': str(getattr(obj, 'status', 'unknown')),
                     'num_variables': len(getattr(obj, 'variables', [])),
                     'num_constraints': len(getattr(obj, 'constraints', [])),
-                    'objective': str(getattr(obj, 'objective', 'none'))
+                    'objective': str(getattr(obj, 'objective', 'none')),
+                    'lp_file_path': lp_file_path,
+                    'mps_file_path': mps_file_path
                 }}
                 problems_info.append(problem_info)
 
@@ -801,7 +807,7 @@ def __extract_problem_info(globals_dict):
                     'error': f"Failed to extract problem info: {{e}}"
                 }})
 
-    return problems_info, lp_content, mps_content
+    return problems_info, lp_file_path, mps_file_path
 
 try:
     # Execute user code
@@ -814,27 +820,15 @@ try:
     # Extract and serialize all relevant information as JSON
     __globals_copy = dict(globals())
 
-    # Find and extract PuLP problem information
-    __problems_info, __lp_content, __mps_content = __extract_problem_info(__globals_copy)
+    # Find and extract PuLP problem information (writes files to virtual fs)
+    __problems_info, __lp_file_path, __mps_file_path = __extract_problem_info(__globals_copy)
 
-    # Convert user variables to JSON-safe format
-    __variables_info = {{}}
-    for __var_name in list(__globals_copy.keys()):
-        if (not __var_name.startswith('_') and
-            __var_name not in ['pulp', 'io', 'sys', 'tempfile', 'json'] and
-            not callable(__globals_copy[__var_name])):
-            try:
-                __variables_info[__var_name] = __convert_to_json_safe(__globals_copy[__var_name])
-            except Exception as __e:
-                __variables_info[__var_name] = f"<conversion_error: {{__e}}>"
-
-    # Create comprehensive result data
+    # Create result data with file paths (avoids large JSON)
     __result_data = {{
         'stdout': __stdout__,
-        'lp_content': __lp_content,
-        'mps_content': __mps_content,
+        'lp_file_path': __lp_file_path,
+        'mps_file_path': __mps_file_path,
         'problems_info': __problems_info,
-        'variables_info': __variables_info,
         'execution_status': 'success'
     }}
 
@@ -852,8 +846,8 @@ except Exception as e:
     # Create error result data
     __result_data = {{
         'stdout': __stdout__,
-        'lp_content': None,
-        'mps_content': None,
+        'lp_file_path': None,
+        'mps_file_path': None,
         'problems_info': [],
         'variables_info': {{}},
         'execution_status': 'error',
@@ -917,23 +911,32 @@ globals()['__json_result__'] = __json_result__
         indent = " " * spaces
         return "\n".join(indent + line for line in code.split("\n"))
 
-    def _create_temp_file(self, content: str, format_type: str) -> str:
-        """Create temporary file with the given content.
+    def _copy_optimization_file(self, source_path: str, format_type: str) -> str:
+        """Copy optimization file from isolated directory to new temporary file.
 
         Args:
-            content: File content
+            source_path: Path to source file in isolated directory
             format_type: File format ("lp" or "mps")
 
         Returns:
-            Path to temporary file
+            Path to new temporary file
         """
+        import shutil
+
         suffix = f".{format_type.lower()}"
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False) as f:
-            f.write(content)
             temp_path = f.name
 
-        logger.info(f"Created temporary {format_type.upper()} file: {temp_path}")
+        # Track temporary file for cleanup
+        self._temp_files.append(temp_path)
+
+        # Copy the file content
+        shutil.copy2(source_path, temp_path)
+
+        logger.info(
+            f"Copied {format_type.upper()} file from {source_path} to {temp_path}"
+        )
         return temp_path
 
     async def validate_code(self, code: str) -> dict[str, Any]:
@@ -1059,6 +1062,44 @@ globals()['__json_result__'] = __json_result__
                 self.pyodide_process = None
                 self._pyodide_initialized = False
                 logger.info("Pyodide process cleanup completed")
+
+        # Clean up tracked temporary files
+        if hasattr(self, "_temp_files"):
+            for temp_file in self._temp_files:
+                try:
+                    with contextlib.suppress(OSError, FileNotFoundError):
+                        Path(temp_file).unlink()
+                    logger.debug(f"Cleaned up temporary file: {temp_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {temp_file}: {e}")
+            self._temp_files.clear()
+
+        # Clean up Node.js script file if it still exists
+        if hasattr(self, "_script_file") and self._script_file:
+            try:
+                with contextlib.suppress(OSError, FileNotFoundError):
+                    Path(self._script_file).unlink()
+                logger.debug(f"Cleaned up script file: {self._script_file}")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to clean up script file {self._script_file}: {e}"
+                )
+            finally:
+                self._script_file = None
+
+        # Clean up isolated temporary directory
+        if hasattr(self, "temp_dir") and self.temp_dir:
+            try:
+                import shutil
+
+                shutil.rmtree(self.temp_dir, ignore_errors=True)
+                logger.info(f"Cleaned up isolated temp directory: {self.temp_dir}")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to clean up temp directory {self.temp_dir}: {e}"
+                )
+            finally:
+                self.temp_dir = None
 
     def __del__(self):
         """Cleanup on destruction."""

@@ -82,25 +82,24 @@ print("Tuple key test completed successfully")
                 executor, "_execute_with_periodic_progress", new_callable=AsyncMock
             ) as mock_execute,
         ):
-            # Mock successful JSON-based execution
+            # Mock successful filesystem-based execution
             mock_execute.return_value = {
                 "success": True,
                 "json_data": {
                     "execution_status": "success",
                     "stdout": "Tuple key test completed successfully",
-                    "lp_content": "\\* test *\\\nMinimize\nOBJ: x_0_a + x_0_b + x_1_a + x_1_b\nSubject To\n_C1: x_0_a + x_0_b + x_1_a + x_1_b >= 1\nBinaries\nx_0_a\nx_0_b\nx_1_a\nx_1_b\nEnd",
-                    "mps_content": None,
+                    "lp_file_path": "/mnt/problem_12345.lp",
+                    "mps_file_path": "/mnt/problem_12345.mps",
                     "problems_info": [{"name": "prob", "num_variables": 4}],
-                    "variables_info": {
-                        "var_map": {
-                            "0_a": "x_0_a",
-                            "0_b": "x_0_b",
-                            "1_a": "x_1_a",
-                            "1_b": "x_1_b",
-                        }
-                    },
                 },
             }
+
+            # Create mock files in the executor's temp directory
+            from pathlib import Path
+
+            lp_content = "\\* test *\\\nMinimize\nOBJ: x_0_a + x_0_b + x_1_a + x_1_b\nSubject To\n_C1: x_0_a + x_0_b + x_1_a + x_1_b >= 1\nBinaries\nx_0_a\nx_0_b\nx_1_a\nx_1_b\nEnd"
+            mock_lp_file = Path(executor.temp_dir) / "problem_12345.lp"
+            mock_lp_file.write_text(lp_content)
 
             stdout, stderr, file_path, library = await executor.execute_mip_code(
                 tuple_key_code
