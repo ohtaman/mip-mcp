@@ -42,7 +42,11 @@ class PyodideExecutor:
             "execution_timeout", 60.0
         )  # Execution timeout for MCP
 
-        logger.info("Pyodide executor initialized")
+        # Create isolated temporary directory for this executor instance
+        self.temp_dir = tempfile.mkdtemp(prefix="mip_mcp_executor_")
+        logger.info(
+            f"Pyodide executor initialized with isolated temp dir: {self.temp_dir}"
+        )
 
     def set_progress_callback(
         self, callback: Callable[[SolverProgress], None] | None
@@ -213,6 +217,21 @@ class PyodideExecutor:
                         f"Pyodide initialization failed: {init_result.get('error', 'unknown error')}"
                     )
 
+                # Mount the isolated temp directory
+                mount_result = await self._communicate_with_pyodide(
+                    {"action": "mount", "path": self.temp_dir}
+                )
+
+                if not mount_result.get("success"):
+                    logger.warning(
+                        f"Failed to mount temp directory: {mount_result.get('error')}"
+                    )
+                    # Continue anyway, fallback to virtual filesystem
+                else:
+                    logger.info(
+                        f"Mounted temp directory {self.temp_dir} to /mnt in Pyodide"
+                    )
+
                 self._pyodide_initialized = True
                 logger.info("Pyodide environment initialized successfully")
 
@@ -339,8 +358,7 @@ let pyodide = null;
 
 const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stderr,  // Use stderr to avoid JSON output conflicts
-    historySize: 0  // Disable history to save memory
+    output: process.stderr  // Use stderr to avoid JSON output conflicts
 });
 
 async function initPyodide() {
@@ -358,6 +376,17 @@ async function initPyodide() {
             await micropip.install('pulp')
         `);
 
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+}
+
+async function mountTempDir(tempDirPath) {
+    try {
+        // Mount the host temp directory to /mnt in Pyodide filesystem
+        pyodide.FS.mkdir('/mnt');
+        pyodide.FS.mount(pyodide.FS.filesystems.NODEFS, { root: tempDirPath }, '/mnt');
         return { success: true };
     } catch (error) {
         return { success: false, error: error.message };
@@ -425,6 +454,9 @@ rl.on('line', async (input) => {
             case 'init':
                 response = await initPyodide();
                 break;
+            case 'mount':
+                response = await mountTempDir(request.path);
+                break;
             case 'execute':
                 response = await executePython(request.code);
                 break;
@@ -435,47 +467,11 @@ rl.on('line', async (input) => {
                 response = { success: false, error: 'Unknown action' };
         }
 
-        sendResponse(response);
+        console.log(JSON.stringify(response));
     } catch (error) {
-        sendResponse({ success: false, error: error.message });
+        console.log(JSON.stringify({ success: false, error: error.message }));
     }
 });
-
-function sendResponse(response) {
-    const jsonString = JSON.stringify(response);
-    const maxChunkSize = 32768;  // 32KB chunks
-
-    if (jsonString.length <= maxChunkSize) {
-        // Send as single line for backward compatibility
-        console.log(jsonString);
-    } else {
-        // Send as chunked response
-        const chunks = [];
-        for (let i = 0; i < jsonString.length; i += maxChunkSize) {
-            chunks.push(jsonString.substring(i, i + maxChunkSize));
-        }
-
-        // Send chunked header
-        console.log(JSON.stringify({
-            __chunked: true,
-            __total_chunks: chunks.length,
-            __chunk_size: maxChunkSize
-        }));
-
-        // Send each chunk
-        for (let i = 0; i < chunks.length; i++) {
-            console.log(JSON.stringify({
-                __chunk_index: i,
-                __chunk_data: chunks[i]
-            }));
-        }
-
-        // Send end marker
-        console.log(JSON.stringify({
-            __chunked_end: true
-        }));
-    }
-}
 
 // Handle process cleanup
 process.on('SIGINT', () => process.exit(0));
@@ -499,14 +495,14 @@ console.error('DEBUG: Node.js process ready for commands');
             self.pyodide_process.stdin.write(request_json.encode())
             await self.pyodide_process.stdin.drain()
 
-            # Read first response line with timeout
-            first_line = await asyncio.wait_for(
+            # Read response with timeout
+            response_line = await asyncio.wait_for(
                 self.pyodide_process.stdout.readline(),
                 timeout=self.execution_timeout + 10.0,  # Allow for execution + margin
             )
-            first_response_str = first_line.decode().strip()
+            response_str = response_line.decode().strip()
 
-            if not first_response_str:
+            if not response_str:
                 # Try to read stderr for error info
                 try:
                     stderr_data = await asyncio.wait_for(
@@ -521,17 +517,9 @@ console.error('DEBUG: Node.js process ready for commands');
                     return {"success": False, "error": "Empty response from Pyodide"}
 
             try:
-                first_response = json.loads(first_response_str)
-
-                # Check if this is a chunked response
-                if isinstance(first_response, dict) and first_response.get("__chunked"):
-                    return await self._read_chunked_response(first_response)
-                else:
-                    # Regular single-line response
-                    return first_response
-
+                return json.loads(response_str)
             except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON response: {first_response_str}")
+                logger.error(f"Invalid JSON response: {response_str}")
                 return {"success": False, "error": f"Invalid JSON response: {e}"}
 
         except TimeoutError:
@@ -540,85 +528,6 @@ console.error('DEBUG: Node.js process ready for commands');
         except Exception as e:
             logger.error(f"Communication with Pyodide failed: {e}")
             return {"success": False, "error": str(e)}
-
-    async def _read_chunked_response(self, header: dict[str, Any]) -> dict[str, Any]:
-        """Read a chunked response from Pyodide process."""
-        try:
-            total_chunks = header.get("__total_chunks", 0)
-            chunk_size = header.get("__chunk_size", 32768)
-
-            logger.info(
-                f"Reading chunked response: {total_chunks} chunks, {chunk_size} bytes each"
-            )
-
-            # Read all chunks
-            chunks = [""] * total_chunks
-            chunks_received = 0
-
-            while chunks_received < total_chunks:
-                chunk_line = await asyncio.wait_for(
-                    self.pyodide_process.stdout.readline(),
-                    timeout=30.0,  # Generous timeout for chunk reading
-                )
-                chunk_str = chunk_line.decode().strip()
-
-                if not chunk_str:
-                    return {"success": False, "error": "Empty chunk received"}
-
-                try:
-                    chunk_data = json.loads(chunk_str)
-
-                    if chunk_data.get("__chunked_end"):
-                        # End marker received, break early
-                        break
-
-                    chunk_index = chunk_data.get("__chunk_index")
-                    chunk_content = chunk_data.get("__chunk_data", "")
-
-                    if chunk_index is not None and 0 <= chunk_index < total_chunks:
-                        chunks[chunk_index] = chunk_content
-                        chunks_received += 1
-                    else:
-                        logger.warning(f"Invalid chunk index: {chunk_index}")
-
-                except json.JSONDecodeError as e:
-                    logger.error(f"Invalid chunk JSON: {e}")
-                    return {"success": False, "error": f"Invalid chunk JSON: {e}"}
-
-            # Wait for end marker if not received yet
-            if chunks_received == total_chunks:
-                try:
-                    end_line = await asyncio.wait_for(
-                        self.pyodide_process.stdout.readline(),
-                        timeout=5.0,
-                    )
-                    end_str = end_line.decode().strip()
-                    if end_str:
-                        end_data = json.loads(end_str)
-                        if not end_data.get("__chunked_end"):
-                            logger.warning("Expected end marker not received")
-                except Exception:
-                    logger.warning("Failed to read end marker")
-
-            # Reassemble the response
-            full_json_str = "".join(chunks)
-            logger.info(f"Reassembled response: {len(full_json_str)} characters")
-
-            try:
-                return json.loads(full_json_str)
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse reassembled JSON: {e}")
-                return {
-                    "success": False,
-                    "error": f"Failed to parse reassembled JSON: {e}",
-                }
-
-        except TimeoutError:
-            logger.error("Timeout reading chunked response")
-            return {"success": False, "error": "Timeout reading chunked response"}
-        except Exception as e:
-            logger.error(f"Error reading chunked response: {e}")
-            return {"success": False, "error": f"Error reading chunked response: {e}"}
 
     async def execute_mip_code(
         self,
@@ -721,22 +630,34 @@ console.error('DEBUG: Node.js process ready for commands');
                     detected_library,
                 )
 
-            # Extract content (LP preferred, then MPS)
-            lp_content = json_data.get("lp_content")
-            mps_content = json_data.get("mps_content")
+            # Get file paths from Pyodide execution and map to host filesystem
+            lp_file_path = json_data.get("lp_file_path")
+            mps_file_path = json_data.get("mps_file_path")
 
-            # Automatic format detection: LP preferred, then MPS
-            content = None
+            # Map Pyodide paths (/mnt/...) to host filesystem paths
+            host_lp_path = None
+            host_mps_path = None
+            if lp_file_path and lp_file_path.startswith("/mnt/"):
+                host_lp_path = str(
+                    Path(self.temp_dir) / lp_file_path[5:]
+                )  # Remove /mnt/ prefix
+            if mps_file_path and mps_file_path.startswith("/mnt/"):
+                host_mps_path = str(
+                    Path(self.temp_dir) / mps_file_path[5:]
+                )  # Remove /mnt/ prefix
+
+            # Determine which file to use (LP preferred, then MPS)
+            source_file_path = None
             file_format = None
-            if lp_content:
-                content = lp_content
+            if host_lp_path and Path(host_lp_path).exists():
+                source_file_path = host_lp_path
                 file_format = "lp"
-            elif mps_content:
-                content = mps_content
+            elif host_mps_path and Path(host_mps_path).exists():
+                source_file_path = host_mps_path
                 file_format = "mps"
 
-            if not content:
-                # Check if there were problems but failed to generate content
+            if not source_file_path:
+                # Check if there were problems but failed to generate files
                 problems_info = json_data.get("problems_info", [])
                 if problems_info:
                     problem_errors = [
@@ -746,25 +667,25 @@ console.error('DEBUG: Node.js process ready for commands');
                         error_details = "; ".join(problem_errors)
                         return (
                             json_data.get("stdout", ""),
-                            f"Problem found but failed to generate content: {error_details}",
+                            f"Problem found but failed to generate files: {error_details}",
                             None,
                             detected_library,
                         )
 
                 return (
                     json_data.get("stdout", ""),
-                    "No optimization file content generated",
+                    "No optimization file generated",
                     None,
                     detected_library,
                 )
 
-            # Send progress for file generation
+            # Send progress for file processing
             self._send_progress(
-                "modeling", f"Generating {file_format.upper()} optimization file"
+                "modeling", f"Processing {file_format.upper()} optimization file"
             )
 
-            # Write content to temporary file
-            temp_file = self._create_temp_file(content, file_format)
+            # Copy file from isolated directory to a new temporary file for return
+            temp_file = self._copy_optimization_file(source_file_path, file_format)
 
             # Send final modeling progress
             self._send_progress(
@@ -813,6 +734,9 @@ console.error('DEBUG: Node.js process ready for commands');
         if data:
             data_setup = f"__data__ = {json.dumps(data)}\n"
 
+        # Pass isolated temp directory to Pyodide
+        temp_dir_setup = f"__temp_dir__ = '{self.temp_dir}'\n"
+
         wrapper_code = f"""
 import io
 import sys
@@ -826,6 +750,8 @@ sys.stdout = __stdout_capture__
 
 # Setup data if provided
 {data_setup}
+# Setup isolated temp directory
+{temp_dir_setup}
 
 def __convert_to_json_safe(obj, visited=None):
     '''Convert objects to JSON-safe format, handling tuple keys and complex objects.'''
@@ -872,39 +798,24 @@ def __convert_to_json_safe(obj, visited=None):
         visited.discard(obj_id)
 
 def __extract_problem_info(globals_dict):
-    '''Extract PuLP problem information and generate LP/MPS content.'''
+    '''Extract PuLP problem information and write files to mounted filesystem.'''
     problems_info = []
-    lp_content = None
-    mps_content = None
+    lp_file_path = None
+    mps_file_path = None
 
     for name, obj in globals_dict.items():
         if hasattr(obj, 'writeLP') and hasattr(obj, 'writeMPS'):
             try:
-                # Generate LP content
-                import tempfile
-                import os
+                import time
 
-                # Create temporary files for LP and MPS
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.lp', delete=False) as lp_file:
-                    lp_path = lp_file.name
+                # Use mounted filesystem at /mnt with unique filenames
+                unique_id = str(int(time.time() * 1000000) % 100000000)
+                lp_file_path = f"/mnt/problem_{{unique_id}}.lp"
+                mps_file_path = f"/mnt/problem_{{unique_id}}.mps"
 
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.mps', delete=False) as mps_file:
-                    mps_path = mps_file.name
-
-                # Write LP and MPS files
-                obj.writeLP(lp_path)
-                obj.writeMPS(mps_path)
-
-                # Read content
-                with open(lp_path, 'r') as f:
-                    lp_content = f.read()
-
-                with open(mps_path, 'r') as f:
-                    mps_content = f.read()
-
-                # Clean up temporary files
-                os.unlink(lp_path)
-                os.unlink(mps_path)
+                # Write LP and MPS files to mounted filesystem (accessible from host)
+                obj.writeLP(lp_file_path)
+                obj.writeMPS(mps_file_path)
 
                 problem_info = {{
                     'name': name,
@@ -912,7 +823,9 @@ def __extract_problem_info(globals_dict):
                     'status': str(getattr(obj, 'status', 'unknown')),
                     'num_variables': len(getattr(obj, 'variables', [])),
                     'num_constraints': len(getattr(obj, 'constraints', [])),
-                    'objective': str(getattr(obj, 'objective', 'none'))
+                    'objective': str(getattr(obj, 'objective', 'none')),
+                    'lp_file_path': lp_file_path,
+                    'mps_file_path': mps_file_path
                 }}
                 problems_info.append(problem_info)
 
@@ -925,7 +838,7 @@ def __extract_problem_info(globals_dict):
                     'error': f"Failed to extract problem info: {{e}}"
                 }})
 
-    return problems_info, lp_content, mps_content
+    return problems_info, lp_file_path, mps_file_path
 
 try:
     # Execute user code
@@ -938,27 +851,15 @@ try:
     # Extract and serialize all relevant information as JSON
     __globals_copy = dict(globals())
 
-    # Find and extract PuLP problem information
-    __problems_info, __lp_content, __mps_content = __extract_problem_info(__globals_copy)
+    # Find and extract PuLP problem information (writes files to virtual fs)
+    __problems_info, __lp_file_path, __mps_file_path = __extract_problem_info(__globals_copy)
 
-    # Convert user variables to JSON-safe format
-    __variables_info = {{}}
-    for __var_name in list(__globals_copy.keys()):
-        if (not __var_name.startswith('_') and
-            __var_name not in ['pulp', 'io', 'sys', 'tempfile', 'json'] and
-            not callable(__globals_copy[__var_name])):
-            try:
-                __variables_info[__var_name] = __convert_to_json_safe(__globals_copy[__var_name])
-            except Exception as __e:
-                __variables_info[__var_name] = f"<conversion_error: {{__e}}>"
-
-    # Create comprehensive result data
+    # Create result data with file paths (avoids large JSON)
     __result_data = {{
         'stdout': __stdout__,
-        'lp_content': __lp_content,
-        'mps_content': __mps_content,
+        'lp_file_path': __lp_file_path,
+        'mps_file_path': __mps_file_path,
         'problems_info': __problems_info,
-        'variables_info': __variables_info,
         'execution_status': 'success'
     }}
 
@@ -976,8 +877,8 @@ except Exception as e:
     # Create error result data
     __result_data = {{
         'stdout': __stdout__,
-        'lp_content': None,
-        'mps_content': None,
+        'lp_file_path': None,
+        'mps_file_path': None,
         'problems_info': [],
         'variables_info': {{}},
         'execution_status': 'error',
@@ -1041,23 +942,29 @@ globals()['__json_result__'] = __json_result__
         indent = " " * spaces
         return "\n".join(indent + line for line in code.split("\n"))
 
-    def _create_temp_file(self, content: str, format_type: str) -> str:
-        """Create temporary file with the given content.
+    def _copy_optimization_file(self, source_path: str, format_type: str) -> str:
+        """Copy optimization file from isolated directory to new temporary file.
 
         Args:
-            content: File content
+            source_path: Path to source file in isolated directory
             format_type: File format ("lp" or "mps")
 
         Returns:
-            Path to temporary file
+            Path to new temporary file
         """
+        import shutil
+
         suffix = f".{format_type.lower()}"
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False) as f:
-            f.write(content)
             temp_path = f.name
 
-        logger.info(f"Created temporary {format_type.upper()} file: {temp_path}")
+        # Copy the file content
+        shutil.copy2(source_path, temp_path)
+
+        logger.info(
+            f"Copied {format_type.upper()} file from {source_path} to {temp_path}"
+        )
         return temp_path
 
     async def validate_code(self, code: str) -> dict[str, Any]:
@@ -1183,6 +1090,20 @@ globals()['__json_result__'] = __json_result__
                 self.pyodide_process = None
                 self._pyodide_initialized = False
                 logger.info("Pyodide process cleanup completed")
+
+        # Clean up isolated temporary directory
+        if hasattr(self, "temp_dir") and self.temp_dir:
+            try:
+                import shutil
+
+                shutil.rmtree(self.temp_dir, ignore_errors=True)
+                logger.info(f"Cleaned up isolated temp directory: {self.temp_dir}")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to clean up temp directory {self.temp_dir}: {e}"
+                )
+            finally:
+                self.temp_dir = None
 
     def __del__(self):
         """Cleanup on destruction."""
